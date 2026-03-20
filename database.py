@@ -39,7 +39,7 @@ def match_fields_with_db(customer_id: str, extracted: dict) -> dict:
         cur.execute(
             """
             SELECT first_name, last_name, date_of_birth,
-                   id_number, id_expiry_date
+                   id_number_encrypted AS id_number, id_expiry_date
             FROM   kyc_records
             WHERE  customer_id = %s
             LIMIT  1

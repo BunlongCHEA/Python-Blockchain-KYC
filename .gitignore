@@ -1,0 +1,7 @@
+.vscode/
+__pycache__
+face/__pycache__
+ocr/__pycache__
+routers/__pycache__
+utils/__pycache__
+.env
