@@ -30,6 +30,7 @@ router = APIRouter(prefix="/api/kyc/verify", tags=["KYC Verification"])
 def _run_pipeline(
     customer_id: str,
     document_type: str,
+    id_img_bytes:  Optional[bytes], 
     id_img: Optional[np.ndarray],
     selfie_img: Optional[np.ndarray],
 ) -> KYCVerifyResponse:
@@ -45,8 +46,10 @@ def _run_pipeline(
     # ── Step 1: OCR ──────────────────────────────────────
     if id_img is not None:
         try:
-            processed = preprocess_for_ocr(id_img)
-            texts, ocr_conf = run_ocr(processed)
+            # processed = preprocess_for_ocr(id_img)
+            # texts, ocr_conf = run_ocr(processed)
+            
+            texts, ocr_conf = run_ocr(id_img_bytes) # bytes, not numpy
 
             fields = (
                 extract_passport_fields(texts)
@@ -112,12 +115,17 @@ def verify_kyc(body: KYCVerifyRequest):
     - id_image_base64 is required (ID card or passport)
     - selfie_image_base64 is optional — enables face comparison
     """
+    id_img_bytes: Optional[bytes]    = None
     id_img:     Optional[np.ndarray] = None
     selfie_img: Optional[np.ndarray] = None
 
     if body.id_image_base64:
         try:
-            id_img = decode_base64_image(body.id_image_base64)
+            # id_img = decode_base64_image(body.id_image_base64)
+            
+            id_img_bytes = base64.b64decode(body.id_image_base64)
+            arr          = np.frombuffer(id_img_bytes, dtype=np.uint8)
+            id_img       = cv2.imdecode(arr, cv2.IMREAD_COLOR)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=f"id_image_base64: {exc}")
 
@@ -127,7 +135,7 @@ def verify_kyc(body: KYCVerifyRequest):
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=f"selfie_image_base64: {exc}")
 
-    return _run_pipeline(body.customer_id, body.document_type, id_img, selfie_img)
+    return _run_pipeline(body.customer_id, body.document_type, id_img_bytes, id_img, selfie_img)
 
 
 # ── POST /api/kyc/verify/upload  (multipart) ──────────────────────────────────

@@ -1,3 +1,11 @@
+# I. Install Python Libs
+
+```bash
+pip install -r requirements.txt
+```
+
+# II. Structure Project and Details
+
 ```bash
 python_kyc_service/
 ├── main.py               ← FastAPI app entry point + route registration, /health

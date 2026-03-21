@@ -5,6 +5,7 @@ Accepts base64 JSON body or multipart file upload.
 import io
 import logging
 
+import base64
 import cv2
 import numpy as np
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
@@ -19,9 +20,15 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/kyc/scan", tags=["OCR / Scan"])
 
 
-def _process(img: np.ndarray, document_type: str) -> OCRResult:
-    processed          = preprocess_for_ocr(img)
-    texts, confidence  = run_ocr(processed)
+# def _process(img: np.ndarray, document_type: str) -> OCRResult:
+def _process(img: bytes, document_type: str) -> OCRResult:
+    """
+    Run Google Doc AI OCR on raw image bytes, then extract fields.
+    image_bytes: raw JPEG/PNG bytes (not numpy array anymore)
+    """
+    texts, confidence = run_ocr(img) # pass bytes directly
+    # processed          = preprocess_for_ocr(img)
+    # texts, confidence  = run_ocr(processed)
 
     if document_type == "passport":
         fields = extract_passport_fields(texts)
@@ -44,7 +51,10 @@ def scan_document(body: ScanRequest):
     OCR-extracted fields (Khmer / English).
     """
     try:
-        img = decode_base64_image(body.image_base64)
+        # img = decode_base64_image(body.image_base64)
+        
+        # Decode base64 → raw bytes for Google Doc AI
+        img = base64.b64decode(body.image_base64)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
@@ -65,9 +75,11 @@ async def scan_document_upload(
     Accepts an image file (JPEG / PNG) via multipart/form-data and returns
     OCR-extracted fields.
     """
-    data = await file.read()
-    arr  = np.frombuffer(data, dtype=np.uint8)
-    img  = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+    # data = await file.read()
+    # arr  = np.frombuffer(data, dtype=np.uint8)
+    # img  = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+    
+    img = await file.read()   # ← raw bytes directly to Google Doc AI
     if img is None:
         raise HTTPException(status_code=400, detail="Cannot decode uploaded image file")
 
