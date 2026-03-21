@@ -4,11 +4,12 @@ python-multipart==0.0.22
 pydantic==2.12.0
 deepface==0.0.99
 # easyocr==1.7.2
-pytesseract==0.3.13
+# pytesseract==0.3.13
 opencv-python-headless==4.13.0.92
 Pillow==12.1.1
 numpy==2.4.3
 psycopg2-binary==2.9.11
 python-dotenv==1.2.2
 tf-keras==2.20.1
-google-cloud-documentai==3.11.0
+# google-cloud-documentai==3.11.0
+google-cloud-vision==3.12.1

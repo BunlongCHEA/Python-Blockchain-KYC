@@ -13,23 +13,26 @@ def compute_overall_score(
     """
     Compute a 0-100 overall KYC score and return (score, status, reason).
 
-    Weights:
-    - With selfie:   OCR 30 % | Face 40 % | DB 30 %
-    - Without selfie: OCR 50 % | DB 50 %
+    Weights WITH selfie   : OCR 35% | Face 40% | DB 25%
+    Weights WITHOUT selfie: OCR 60% | DB 40%
 
-    Status thresholds (configurable via env):
-    - >= SCORE_VERIFIED (default 80)  → VERIFIED
-    - >= SCORE_NEEDS_REVIEW (default 50) → NEEDS_REVIEW
-    - else → REJECTED
+    face_similarity is already 0-100 from DeepFace — divide by 100 to normalise.
+
+    Status thresholds (set in .env):
+      SCORE_VERIFIED      default 75  (was 80 — relaxed since DB no longer checks encrypted ID)
+      SCORE_NEEDS_REVIEW  default 50
     """
     if has_selfie:
         raw = (
-            ocr_confidence          * 0.30
-            + (face_similarity / 100) * 0.40
-            + db_match_score          * 0.30
+            ocr_confidence            * 0.35   # OCR quality
+            + (face_similarity / 100) * 0.40   # face match
+            + db_match_score          * 0.25   # name + DOB match
         )
     else:
-        raw = ocr_confidence * 0.50 + db_match_score * 0.50
+        raw = (
+            ocr_confidence * 0.60
+            + db_match_score * 0.40
+        )
 
     score = round(min(raw * 100, 100.0), 2)
 

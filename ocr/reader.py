@@ -6,19 +6,20 @@ import os
 import base64
 import json
 import logging
-import tempfile
+# import tempfile
 
-from typing import Optional
-import numpy as np
-import easyocr
+# from typing import Optional
+# import numpy as np
+# import easyocr
 
-import numpy as np
-import pytesseract
-from PIL import Image
-from pytesseract import Output
+# import numpy as np
+# import pytesseract
+# from PIL import Image
+# from pytesseract import Output
 
-from google.api_core.client_options import ClientOptions
-from google.cloud import documentai
+# from google.api_core.client_options import ClientOptions
+# from google.cloud import documentai
+from google.cloud import vision
 from google.oauth2 import service_account
 
 from config import settings
@@ -26,16 +27,17 @@ from config import settings
 logger = logging.getLogger(__name__)
 
 
-# Google Document AI Code
-
-# ── Config from .env ──────────────────────────────────────────────────────────
-_PROJECT_ID   = os.getenv("GOOGLE_PROJECT_ID", "").strip()
-_LOCATION     = os.getenv("GOOGLE_DOCAI_LOCATION", "us").strip()
-_PROCESSOR_ID = os.getenv("GOOGLE_DOCAI_PROCESSOR_ID", "").strip()
+# Config from .env
+# _PROJECT_ID   = os.getenv("GOOGLE_PROJECT_ID", "").strip()
+# _LOCATION     = os.getenv("GOOGLE_DOCAI_LOCATION", "us").strip()
+# _PROCESSOR_ID = os.getenv("GOOGLE_DOCAI_PROCESSOR_ID", "").strip()
 _CREDENTIALS_B64  = os.getenv("GOOGLE_APPLICATION_CREDENTIALS_BASE64", "").strip()
 _CREDENTIALS_FILE  = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "").strip()
 
+# Language hints — Khmer first, then English (Latin fallback for MRZ/labels)
+_LANGUAGE_HINTS = ["km", "en"]
 
+# Google Credential for both Vision API and Document AI:
 def _get_credentials():
     """
     Load credentials — priority:
@@ -69,74 +71,149 @@ def _get_credentials():
     logger.info("Using Application Default Credentials")
     return None
 
-def _get_client() -> documentai.DocumentProcessorServiceClient:
-    opts        = ClientOptions(api_endpoint=f"{_LOCATION}-documentai.googleapis.com")
+def _get_client() -> vision.ImageAnnotatorClient:
     credentials = _get_credentials()
-
     if credentials:
-        return documentai.DocumentProcessorServiceClient(
-            credentials=credentials,
-            client_options=opts,
-        )
-    # ADC path
-    return documentai.DocumentProcessorServiceClient(client_options=opts)
-
+        return vision.ImageAnnotatorClient(credentials=credentials)
+    return vision.ImageAnnotatorClient()  # ADC
 
 def run_ocr(image_bytes: bytes, mime_type: str = "image/jpeg") -> tuple[list[str], float]:
     """
-    Send image bytes to Google Document AI OCR processor.
+    Send image bytes to Google Cloud Vision TEXT_DETECTION.
+    Language hints: Khmer (km) + English (en) for MRZ/labels.
 
     Returns:
-        texts      : list[str]  — one string per detected text block
-        confidence : float      — average confidence across all blocks (0.0-1.0)
-
-    Keeps the same (texts, confidence) return signature as the old
-    pytesseract run_ocr so scan.py / verify.py need minimal changes.
+        texts      : list[str]  — one string per text block/paragraph
+        confidence : float      — average confidence (0.0–1.0)
     """
-    if not all([_PROJECT_ID, _LOCATION, _PROCESSOR_ID]):
-        logger.error("Missing GOOGLE_PROJECT_ID / GOOGLE_DOCAI_LOCATION / GOOGLE_DOCAI_PROCESSOR_ID")
-        return [], 0.0
-
     try:
-        # → asia-southeast1-documentai.googleapis.com
-        # → projects/6****8/locations/asia-southeast1/processors/<document-ai-procid>
-        client         = _get_client()
-        processor_name = client.processor_path(_PROJECT_ID, _LOCATION, _PROCESSOR_ID)
+        client = _get_client()
 
-        request = documentai.ProcessRequest(
-            name=processor_name,
-            raw_document=documentai.RawDocument(
-                content=image_bytes,
-                mime_type=mime_type,
-            ),
+        image   = vision.Image(content=image_bytes)
+        context = vision.ImageContext(language_hints=_LANGUAGE_HINTS)
+
+        # DOCUMENT_TEXT_DETECTION is better than TEXT_DETECTION for ID cards:
+        # - preserves reading order
+        # - returns per-word confidence scores
+        # - handles dense text layouts (ID cards)
+        response = client.document_text_detection(
+            image=image,
+            image_context=context,
         )
 
-        result   = client.process_document(request=request)
-        document = result.document
+        if response.error.message:
+            logger.error("Vision API error: %s", response.error.message)
+            return [], 0.0
+
+        annotation = response.full_text_annotation
+        if not annotation:
+            logger.warning("Vision API returned no text annotation")
+            return [], 0.0
 
         texts       = []
         confidences = []
 
-        for page in document.pages:
+        # Extract paragraph-level blocks (best granularity for ID card fields)
+        for page in annotation.pages:
             for block in page.blocks:
-                segs = block.layout.text_anchor.text_segments
-                conf = block.layout.confidence
-                text = "".join(
-                    document.text[s.start_index: s.end_index] for s in segs
-                ).strip()
-                if text:
-                    texts.append(text)
-                    confidences.append(conf)
+                block_text  = ""
+                block_confs = []
+
+                for paragraph in block.paragraphs:
+                    para_text = ""
+                    for word in paragraph.words:
+                        word_text = "".join(s.text for s in word.symbols)
+                        para_text += word_text + " "
+                        if word.confidence > 0:
+                            block_confs.append(word.confidence)
+                    block_text += para_text.strip() + "\n"
+
+                block_text = block_text.strip()
+                if block_text:
+                    texts.append(block_text)
+                    if block_confs:
+                        confidences.append(sum(block_confs) / len(block_confs))
 
         avg_conf = round(sum(confidences) / len(confidences), 4) if confidences else 0.0
-        logger.info("Google Doc AI OCR: %d blocks, avg_conf=%.4f", len(texts), avg_conf)
+        logger.info("Cloud Vision OCR: %d blocks, avg_conf=%.4f", len(texts), avg_conf)
         return texts, avg_conf
 
     except Exception as exc:
-        logger.error("Google Document AI OCR failed: %s", exc)
+        logger.error("Google Cloud Vision OCR failed: %s", exc)
         return [], 0.0
 
 
+# ***************************************************
+# Google Document AI OCR
+
+# def _get_client() -> documentai.DocumentProcessorServiceClient:
+#     opts        = ClientOptions(api_endpoint=f"{_LOCATION}-documentai.googleapis.com")
+#     credentials = _get_credentials()
+
+#     if credentials:
+#         return documentai.DocumentProcessorServiceClient(
+#             credentials=credentials,
+#             client_options=opts,
+#         )
+#     # ADC path
+#     return documentai.DocumentProcessorServiceClient(client_options=opts)
+
+# def run_ocr(image_bytes: bytes, mime_type: str = "image/jpeg") -> tuple[list[str], float]:
+#     """
+#     Send image bytes to Google Document AI OCR processor.
+
+#     Returns:
+#         texts      : list[str]  — one string per detected text block
+#         confidence : float      — average confidence across all blocks (0.0-1.0)
+
+#     Keeps the same (texts, confidence) return signature as the old
+#     pytesseract run_ocr so scan.py / verify.py need minimal changes.
+#     """
+#     if not all([_PROJECT_ID, _LOCATION, _PROCESSOR_ID]):
+#         logger.error("Missing GOOGLE_PROJECT_ID / GOOGLE_DOCAI_LOCATION / GOOGLE_DOCAI_PROCESSOR_ID")
+#         return [], 0.0
+
+#     try:
+#         # → asia-southeast1-documentai.googleapis.com
+#         # → projects/6****8/locations/asia-southeast1/processors/<document-ai-procid>
+#         client         = _get_client()
+#         processor_name = client.processor_path(_PROJECT_ID, _LOCATION, _PROCESSOR_ID)
+
+#         request = documentai.ProcessRequest(
+#             name=processor_name,
+#             raw_document=documentai.RawDocument(
+#                 content=image_bytes,
+#                 mime_type=mime_type,
+#             ),
+#         )
+
+#         result   = client.process_document(request=request)
+#         document = result.document
+
+#         texts       = []
+#         confidences = []
+
+#         for page in document.pages:
+#             for block in page.blocks:
+#                 segs = block.layout.text_anchor.text_segments
+#                 conf = block.layout.confidence
+#                 text = "".join(
+#                     document.text[s.start_index: s.end_index] for s in segs
+#                 ).strip()
+#                 if text:
+#                     texts.append(text)
+#                     confidences.append(conf)
+
+#         avg_conf = round(sum(confidences) / len(confidences), 4) if confidences else 0.0
+#         logger.info("Google Doc AI OCR: %d blocks, avg_conf=%.4f", len(texts), avg_conf)
+#         return texts, avg_conf
+
+#     except Exception as exc:
+#         logger.error("Google Document AI OCR failed: %s", exc)
+#         return [], 0.0
+
+
+# ***************************************************
 # Tesseract Code
 
 # _tess_cmd = os.getenv("TESSERACT_CMD", "").strip()
@@ -193,6 +270,7 @@ def run_ocr(image_bytes: bytes, mime_type: str = "image/jpeg") -> tuple[list[str
 #     return texts, avg_conf
 
 
+# ***************************************************
 # EasyOCR Code
 
 # _reader: Optional[easyocr.Reader] = None

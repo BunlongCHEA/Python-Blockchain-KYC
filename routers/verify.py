@@ -156,8 +156,10 @@ async def verify_kyc_upload(
     - selfie_image is optional — enables face comparison
     """
     # Decode ID image
-    id_data = await id_image.read()
-    id_arr  = np.frombuffer(id_data, dtype=np.uint8)
+    # id_data = await id_image.read()
+    # ID image — need both bytes (OCR) and cv2 array (face)
+    id_img_bytes = await id_image.read()
+    id_arr  = np.frombuffer(id_img_bytes, dtype=np.uint8)
     id_img  = cv2.imdecode(id_arr, cv2.IMREAD_COLOR)
     if id_img is None:
         raise HTTPException(status_code=400, detail="Cannot decode id_image file")
@@ -171,4 +173,4 @@ async def verify_kyc_upload(
         if selfie_img is None:
             raise HTTPException(status_code=400, detail="Cannot decode selfie_image file")
 
-    return _run_pipeline(customer_id, document_type, id_img, selfie_img)
+    return _run_pipeline(customer_id, document_type, id_img_bytes, id_img, selfie_img)
