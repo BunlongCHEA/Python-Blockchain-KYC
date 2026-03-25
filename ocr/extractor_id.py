@@ -22,12 +22,11 @@ def _parse_mrz(texts: List[str]) -> Dict[str, str]:
     """
     mrz_lines = []
     for t in texts:
-        # Normalise: uppercase, replace common OCR mistakes
-        clean = t.upper().replace(" ", "").replace("\n", "")
-        # MRZ lines are 30 chars for TD1, 44 for TD3
-        # Accept lines that are mostly alphanumeric + <
-        if re.fullmatch(r"[A-Z0-9<\*]{28,44}", clean):
-            mrz_lines.append(clean)
+        for line in t.upper().split("\n"):           # ← split on newline first
+            clean = re.sub(r"[^A-Z0-9<]", "<", line.strip())  # normalise noise chars
+            clean = clean.replace(" ", "")
+            if re.fullmatch(r"[A-Z0-9<]{28,44}", clean):
+                mrz_lines.append(clean)
 
     if len(mrz_lines) < 2:
         return {}
@@ -44,7 +43,9 @@ def _parse_mrz(texts: List[str]) -> Dict[str, str]:
             # ID number: chars 5–14 of line 1, strip trailing <
             id_raw = l1[5:14].replace("<", "").strip()
             if id_raw:
-                result["id_number"] = id_raw
+                country = l1[2:5]                          # e.g. KHM
+                doc_num = id_raw[:-1] if len(id_raw) > 1 else id_raw  # drop last check digit
+                result["id_number"] = f"ID{country}{doc_num}"  # → IDKHM1234567890
 
             # Line 2: YYMMDD + check + sex + expiry + check + nationality
             if len(l2) >= 30:
@@ -75,7 +76,7 @@ def _parse_mrz(texts: List[str]) -> Dict[str, str]:
 
 
 def _mrz_date(yymmdd: str, is_birth: bool) -> str:
-    """Convert YYMMDD → DD/MM/YYYY. Birth years: 00-30 → 2000s, 31-99 → 1900s."""
+    """Convert YYMMDD → YYYY-MM-DD. Birth years: YY>=31 → 19YY, YY<31 → 20YY."""
     if len(yymmdd) != 6 or not yymmdd.isdigit():
         return ""
     yy, mm, dd = yymmdd[:2], yymmdd[2:4], yymmdd[4:6]
@@ -83,12 +84,17 @@ def _mrz_date(yymmdd: str, is_birth: bool) -> str:
         yyyy = f"19{yy}" if int(yy) >= 31 else f"20{yy}"
     else:
         yyyy = f"20{yy}"
-    return f"{dd}/{mm}/{yyyy}"
+    return f"{yyyy}-{mm}-{dd}"    # ← ISO format, matches DB directly
 
 
 def _nat_code(code: str) -> str:
-    _map = {"KHM": "Cambodian", "THA": "Thai", "VNM": "Vietnamese", "LAO": "Lao"}
-    return _map.get(code.upper(), code)
+    _map = {
+        "KHM": "Cambodian", "THA": "Thai", "VNM": "Vietnamese",
+        "LAO": "Lao", "MMR": "Myanmar", "SGP": "Singaporean",
+        "MYS": "Malaysian", "CHN": "Chinese", "JPN": "Japanese",
+        "USA": "American", "GBR": "British", "FRA": "French",
+    }
+    return _map.get(code.upper().replace("<", ""), code)  # ← also strip < from OCR noise
 
 
 # ── Label-based fallback (for non-MRZ / partially readable cards) ─────────────

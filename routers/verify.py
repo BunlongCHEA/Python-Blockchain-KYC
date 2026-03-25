@@ -89,6 +89,39 @@ def _run_pipeline(
         has_selfie=selfie_img is not None,
     )
 
+    # ── Score breakdown (visible in API response) ─────────────────────────────
+    has_selfie = selfie_img is not None
+    if has_selfie:
+        breakdown = {
+            "formula":              "OCR×0.35 + Face×0.40 + DB×0.25",
+            "ocr_confidence":       round(ocr_conf, 4),
+            "ocr_weighted":         round(ocr_conf * 0.35 * 100, 2),
+            "face_similarity":      round(face_sim, 4),          # 0–100 from DeepFace
+            "face_weighted":        round((face_sim / 100) * 0.40 * 100, 2),
+            "db_match_score":       round(db_match.get("match_score", 0.0), 4),
+            "db_weighted":          round(db_match.get("match_score", 0.0) * 0.25 * 100, 2),
+            "db_matched_fields":    db_match.get("matched_fields", {}),
+            "db_found":             db_match.get("db_found", False),
+            "overall_score":        score,
+            "threshold_verified":   settings.SCORE_VERIFIED,
+            "threshold_review":     settings.SCORE_NEEDS_REVIEW,
+        }
+    else:
+        breakdown = {
+            "formula":              "OCR×0.60 + DB×0.40  (no selfie)",
+            "ocr_confidence":       round(ocr_conf, 4),
+            "ocr_weighted":         round(ocr_conf * 0.60 * 100, 2),
+            "face_similarity":      None,
+            "face_weighted":        None,
+            "db_match_score":       round(db_match.get("match_score", 0.0), 4),
+            "db_weighted":          round(db_match.get("match_score", 0.0) * 0.40 * 100, 2),
+            "db_matched_fields":    db_match.get("matched_fields", {}),
+            "db_found":             db_match.get("db_found", False),
+            "overall_score":        score,
+            "threshold_verified":   settings.SCORE_VERIFIED,
+            "threshold_review":     settings.SCORE_NEEDS_REVIEW,
+        }
+        
     return KYCVerifyResponse(
         customer_id=customer_id,
         document_verified=ocr_conf >= 0.5,
@@ -100,6 +133,7 @@ def _run_pipeline(
         status=status,
         reason=reason,
         timestamp=now,
+        score_breakdown=breakdown,
     )
 
 

@@ -53,3 +53,8 @@ class KYCVerifyResponse(BaseModel):
     status: str           # VERIFIED | REJECTED | NEEDS_REVIEW
     reason: str
     timestamp: str
+    # Score breakdown for debugging
+    score_breakdown: Optional[Dict[str, Any]] = Field(
+        None,
+        description="Per-component scores used to compute overall_score"
+    )
