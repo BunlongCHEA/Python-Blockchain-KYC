@@ -93,7 +93,7 @@ def _run_pipeline(
     has_selfie = selfie_img is not None
     if has_selfie:
         breakdown = {
-            "formula":              "OCR×0.35 + Face×0.40 + DB×0.25",
+            "formula":              "db_weighted + face_similarity + ocr_weighted",
             "ocr_confidence":       round(ocr_conf, 4),
             "ocr_weighted":         round(ocr_conf * 0.35 * 100, 2),
             "face_similarity":      round(face_sim, 4),          # 0–100 from DeepFace
@@ -108,7 +108,7 @@ def _run_pipeline(
         }
     else:
         breakdown = {
-            "formula":              "OCR×0.60 + DB×0.40  (no selfie)",
+            "formula":              "db_weighted + ocr_weighted (no face_similarity since no selfie)",
             "ocr_confidence":       round(ocr_conf, 4),
             "ocr_weighted":         round(ocr_conf * 0.60 * 100, 2),
             "face_similarity":      None,

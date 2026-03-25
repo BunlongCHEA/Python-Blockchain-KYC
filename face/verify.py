@@ -40,12 +40,34 @@ def verify_faces(id_img: np.ndarray, selfie_img: np.ndarray) -> Dict[str, Any]:
 
         distance  = float(result.get("distance",  1.0))
         threshold = float(result.get("threshold", settings.FACE_THRESHOLD))
-        # Similarity: 100 % when distance == 0, 0 % at threshold
-        similarity = max(0.0, round((1.0 - distance / threshold) * 100, 2))
+        # # Similarity: 100 % when distance == 0, 0 % at threshold
+        # similarity = max(0.0, round((1.0 - distance / threshold) * 100, 2))
+        
+        # Use DeepFace's built-in confidence score (0-100) if available.
+        # DeepFace >= 0.0.93 returns "confidence" from a pre-trained logistic
+        # regression model that properly maps distance → probability.
+        confidence = result.get("confidence")
+
+        if confidence is not None:
+            similarity = round(float(confidence), 2)
+        else:
+            # Fallback: convert cosine distance to similarity percentage.
+            # Cosine distance range for ArcFace is 0.0 (identical) to ~1.0 (opposite).
+            # Formula: similarity = (1 - distance) * 100
+            #   distance=0.0   → 100%  (identical)
+            #   distance=0.68  →  32%  (at threshold)
+            #   distance=1.0   →   0%  (completely different)
+            similarity = max(0.0, round((1.0 - distance) * 100, 2))
+
+        logger.info(
+            "[FACE] model=%s distance=%.6f threshold=%.4f verified=%s similarity=%.2f",
+            settings.FACE_MODEL, distance, threshold,
+            result.get("verified"), similarity,
+        )
 
         return {
             "verified":         bool(result.get("verified", False)),
-            "distance":         distance,
+            "distance":         round(distance, 6),
             "threshold":        threshold,
             "model":            settings.FACE_MODEL,
             "similarity_score": similarity,
