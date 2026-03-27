@@ -18,8 +18,8 @@ from face.verify import verify_faces
 from models import KYCVerifyRequest, KYCVerifyResponse
 from ocr.extractor_id import extract_cambodian_id_fields
 from ocr.extractor_passport import extract_passport_fields
-from ocr.reader import run_ocr
-from utils.image import decode_base64_image, preprocess_for_ocr
+from ocr.reader import run_ocr, run_ocr_mrz
+from utils.image import decode_base64_image, preprocess_for_ocr, detect_mrz_zone
 from utils.scoring import compute_overall_score
 
 logger = logging.getLogger(__name__)
@@ -47,6 +47,7 @@ _RE_DATE = re.compile(
     r"\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4}"   # 12/04/1999, 12-04-1999
     r"|\d{4}-\d{2}-\d{2}"                         # 1999-04-12
 )
+
 
 def _is_field_valid(key: str, value: str) -> Tuple[bool, str]:
     """
@@ -131,16 +132,92 @@ def _validate_extracted_fields(
     return all_required_ok, invalid_fields, missing_required
 
 
+# ── Dual-zone OCR helper ─────────────────────────────────────────────────────
+
+def _dual_zone_ocr(
+    id_img: np.ndarray,
+    id_img_bytes: bytes,
+    document_type: str,
+) -> Tuple[list, float, dict, list, float]:
+    """
+    Run OCR twice — full image + cropped MRZ — and merge extracted fields.
+
+    Returns:
+        full_texts    : raw text blocks from full-image pass
+        full_conf     : avg confidence from full-image pass
+        merged_fields : extracted fields (MRZ overrides full where available)
+        mrz_texts     : raw text blocks from MRZ-only pass (for debugging)
+        mrz_conf      : avg confidence from MRZ-only pass
+    """
+    # ── Pass 1: Full image (Khmer + English) ──────────────────────────────────
+    full_texts, full_conf = run_ocr(id_img_bytes)
+    logger.info("[DUAL-OCR] Pass 1 (full): %d blocks, conf=%.4f", len(full_texts), full_conf)
+
+    full_fields = (
+        extract_passport_fields(full_texts)
+        if document_type == "passport"
+        else extract_cambodian_id_fields(full_texts)
+    )
+
+    # ── Pass 2: Cropped MRZ (English only) ────────────────────────────────────
+    mrz_texts: list = []
+    mrz_conf: float = 0.0
+    mrz_fields: dict = {}
+
+    mrz_crop = detect_mrz_zone(id_img)
+    if mrz_crop is not None and mrz_crop.size > 0:
+        # Encode the cropped MRZ region back to bytes for Vision API
+        success, mrz_buf = cv2.imencode(".jpg", mrz_crop)
+        if success:
+            mrz_bytes = mrz_buf.tobytes()
+            mrz_texts, mrz_conf = run_ocr_mrz(mrz_bytes)
+            logger.info("[DUAL-OCR] Pass 2 (MRZ crop): %d blocks, conf=%.4f",
+                        len(mrz_texts), mrz_conf)
+
+            mrz_fields = (
+                extract_passport_fields(mrz_texts)
+                if document_type == "passport"
+                else extract_cambodian_id_fields(mrz_texts)
+            )
+    else:
+        logger.warning("[DUAL-OCR] MRZ zone detection failed — using full-image only")
+
+    # ── Merge: MRZ wins for structured fields, full wins for context ──────────
+    all_keys = ("id_number", "first_name", "last_name", "date_of_birth",
+                "expiry_date", "sex", "nationality")
+
+    merged: dict = {}
+    for key in all_keys:
+        mrz_val  = str(mrz_fields.get(key, "") or "").strip()
+        full_val = str(full_fields.get(key, "") or "").strip()
+
+        # MRZ value takes priority (cleaner ASCII source)
+        if mrz_val:
+            merged[key] = mrz_val
+            logger.info("[DUAL-MERGE] %s = '%s' (from MRZ crop)", key, mrz_val)
+        elif full_val:
+            merged[key] = full_val
+            logger.info("[DUAL-MERGE] %s = '%s' (from full image)", key, full_val)
+        else:
+            merged[key] = ""
+            logger.info("[DUAL-MERGE] %s = '' (no match in either pass)", key)
+
+    # Use the higher confidence of the two passes
+    best_conf = max(full_conf, mrz_conf) if mrz_conf > 0 else full_conf
+
+    return full_texts, best_conf, merged, mrz_texts, mrz_conf
+
+
 # ── Internal pipeline ─────────────────────────────────────────────────────────
 
 def _run_pipeline(
     customer_id: str,
     document_type: str,
-    id_img_bytes:  Optional[bytes], 
+    id_img_bytes:  Optional[bytes],
     id_img: Optional[np.ndarray],
     selfie_img: Optional[np.ndarray],
 ) -> KYCVerifyResponse:
-    """Core KYC pipeline: OCR → face compare → DB match → scoring."""
+    """Core KYC pipeline: dual-zone OCR → field validation → face compare → DB match → scoring."""
     now = datetime.now(timezone.utc).isoformat()
 
     ocr_result:  Optional[dict] = None
@@ -148,48 +225,39 @@ def _run_pipeline(
     db_match:    dict           = {"db_found": False, "match_score": 0.0}
     ocr_conf:    float          = 0.0
     face_sim:    float          = 0.0
+    fields:      dict           = {}
 
-    # ── Step 1: OCR ──────────────────────────────────────
+    # ── Step 1: Dual-Zone OCR ─────────────────────────────
     if id_img is not None:
         try:
-            # processed = preprocess_for_ocr(id_img)
-            # texts, ocr_conf = run_ocr(processed)
-            
-            texts, ocr_conf = run_ocr(id_img_bytes) # bytes, not numpy
-
-            fields = (
-                extract_passport_fields(texts)
-                if document_type == "passport"
-                else extract_cambodian_id_fields(texts)
+            full_texts, ocr_conf, fields, mrz_texts, mrz_conf = _dual_zone_ocr(
+                id_img, id_img_bytes, document_type,
             )
 
             ocr_result = {
-                "raw_text":         texts,
+                "raw_text":         full_texts,
                 "extracted_fields": fields,
                 "confidence":       round(ocr_conf, 4),
                 "document_type":    document_type,
+                # Dual-zone debug info
+                "mrz_raw_text":     mrz_texts,
+                "mrz_confidence":   round(mrz_conf, 4),
+                "ocr_strategy":     "dual_zone",
             }
-
-            # # ── Step 1b: DB field match ───────────────
-            # if customer_id:
-            #     db_match = match_fields_with_db(customer_id, fields)
 
         except Exception as exc:
             logger.error("OCR step failed: %s", exc)
             ocr_result = {"error": str(exc)}
-            
+
     # ── Step 1b: Validate extracted fields ────────────────
-    #   If any REQUIRED field is empty / garbled → short-circuit with OCR_INCOMPLETE.
-    #   This prevents the pipeline from scoring & auto-updating KYC with bad data.
     if ocr_result and "error" not in ocr_result:
         all_ok, invalid_fields, missing_required = _validate_extracted_fields(
             fields, document_type,
         )
 
-        # Attach validation metadata to ocr_result so caller always sees it
-        ocr_result["fields_valid"]      = all_ok
-        ocr_result["invalid_fields"]    = invalid_fields
-        ocr_result["missing_required"]  = missing_required
+        ocr_result["fields_valid"]     = all_ok
+        ocr_result["invalid_fields"]   = invalid_fields
+        ocr_result["missing_required"] = missing_required
 
         if not all_ok:
             logger.warning(
@@ -212,11 +280,13 @@ def _run_pipeline(
                 ),
                 timestamp=now,
                 score_breakdown={
-                    "ocr_confidence":    round(ocr_conf, 4),
-                    "fields_extracted":  len(fields) - len(invalid_fields),
-                    "fields_total":      len(VALIDATABLE_FIELDS),
-                    "invalid_fields":    invalid_fields,
-                    "missing_required":  missing_required,
+                    "ocr_confidence":   round(ocr_conf, 4),
+                    "mrz_confidence":   round(mrz_conf if 'mrz_conf' in dir() else 0.0, 4),
+                    "fields_extracted": len(fields) - len(invalid_fields),
+                    "fields_total":     len(VALIDATABLE_FIELDS),
+                    "invalid_fields":   invalid_fields,
+                    "missing_required": missing_required,
+                    "ocr_strategy":     "dual_zone",
                 },
             )
 
@@ -245,10 +315,10 @@ def _run_pipeline(
     has_selfie = selfie_img is not None
     if has_selfie:
         breakdown = {
-            "formula":              "db_weighted + face_weighted + ocr_weighted",
+            "formula":              "db_weighted + face_similarity + ocr_weighted",
             "ocr_confidence":       round(ocr_conf, 4),
             "ocr_weighted":         round(ocr_conf * 0.35 * 100, 2),
-            "face_similarity":      round(face_sim, 4),          # 0–100 from DeepFace
+            "face_similarity":      round(face_sim, 4),
             "face_weighted":        round((face_sim / 100) * 0.40 * 100, 2),
             "db_match_score":       round(db_match.get("match_score", 0.0), 4),
             "db_weighted":          round(db_match.get("match_score", 0.0) * 0.25 * 100, 2),
@@ -257,10 +327,11 @@ def _run_pipeline(
             "overall_score":        score,
             "threshold_verified":   settings.SCORE_VERIFIED,
             "threshold_review":     settings.SCORE_NEEDS_REVIEW,
+            "ocr_strategy":         "dual_zone",
         }
     else:
         breakdown = {
-            "formula":              "db_weighted + ocr_weighted (no face_weighted since no selfie)",
+            "formula":              "db_weighted + ocr_weighted (no face_similarity since no selfie)",
             "ocr_confidence":       round(ocr_conf, 4),
             "ocr_weighted":         round(ocr_conf * 0.60 * 100, 2),
             "face_similarity":      None,
@@ -272,8 +343,9 @@ def _run_pipeline(
             "overall_score":        score,
             "threshold_verified":   settings.SCORE_VERIFIED,
             "threshold_review":     settings.SCORE_NEEDS_REVIEW,
+            "ocr_strategy":         "dual_zone",
         }
-        
+
     return KYCVerifyResponse(
         customer_id=customer_id,
         document_verified=ocr_conf >= 0.5,

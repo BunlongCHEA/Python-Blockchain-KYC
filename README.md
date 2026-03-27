@@ -67,3 +67,66 @@ Now this works:
 Python
 from ocr.reader import run_ocr   # ✅ works perfectly
 ```
+
+## 1. Structure & Process Google Cloud Vision OCR
+
+```bash
+Original Image
+     │
+     ├──→ Pass 1: run_ocr(full_bytes, hints=["km","en"])
+     │         → full_texts (Khmer names, labels, context)
+     │         → extract_cambodian_id_fields(full_texts)
+     │
+     ├──→ detect_mrz_zone(id_img)  ← OpenCV crop
+     │         │
+     │         └──→ Pass 2: run_ocr_mrz(mrz_bytes, hints=["en"])
+     │                   → mrz_texts (clean ASCII MRZ lines)
+     │                   → extract_cambodian_id_fields(mrz_texts)
+     │
+     └──→ MERGE: MRZ fields override full-image fields
+              │
+              └──→ _validate_extracted_fields()
+                       │
+                  ┌────┴────┐
+              all OK     missing required
+                 │            │
+                 ▼            ▼
+           continue       return OCR_INCOMPLETE
+           pipeline        (frontend retries)
+```
+
+More Detail info from above Diagram:
+
+```bash
+┌─────────────────────────────────────────┐
+│            Original Image               │
+│                                         │
+│  ┌─────────────────────────────────┐    │
+│  │   UPPER ZONE (Khmer + labels)   │ ──→  OCR Pass 1: Full image
+│  │   Name, DOB, Nationality, etc.  │      hints=["km","en"]
+│  └─────────────────────────────────┘    │      → Khmer raw_text + label fields
+│  ┌─────────────────────────────────┐    │
+│  │   LOWER ZONE (MRZ — ASCII)      │ ──→  OCR Pass 2: Cropped MRZ
+│  │   IDKHM0110522898<<<...         │      hints=["en"]  (ASCII only)
+│  └─────────────────────────────────┘    │      → Clean MRZ lines
+└─────────────────────────────────────────┘
+                     │
+                     ▼
+            ┌─────────────────┐
+            │  MERGE RESULTS  │
+            │                 │
+            │  MRZ wins for:  │
+            │   id_number     │
+            │   date_of_birth │
+            │   expiry_date   │
+            │   sex           │
+            │   nationality   │
+            │   first_name    │
+            │   last_name     │
+            │                 │
+            │  Full wins for: │
+            │   Khmer names   │
+            │   raw_text      │
+            │   (all context) │
+            └─────────────────┘
+```
