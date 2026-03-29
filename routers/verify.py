@@ -315,7 +315,7 @@ def _run_pipeline(
     has_selfie = selfie_img is not None
     if has_selfie:
         breakdown = {
-            "formula":              "db_weighted + face_similarity + ocr_weighted",
+            "formula":              "db_weighted + face_weighted + ocr_weighted",
             "ocr_confidence":       round(ocr_conf, 4),
             "ocr_weighted":         round(ocr_conf * 0.35 * 100, 2),
             "face_similarity":      round(face_sim, 4),
@@ -331,7 +331,7 @@ def _run_pipeline(
         }
     else:
         breakdown = {
-            "formula":              "db_weighted + ocr_weighted (no face_similarity since no selfie)",
+            "formula":              "db_weighted + ocr_weighted (no face_weighted since no selfie)",
             "ocr_confidence":       round(ocr_conf, 4),
             "ocr_weighted":         round(ocr_conf * 0.60 * 100, 2),
             "face_similarity":      None,

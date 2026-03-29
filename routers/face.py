@@ -23,6 +23,13 @@ def compare_faces(body: FaceCompareRequest):
     """
     Compare the face extracted from an ID / Passport photo against a
     live selfie image using DeepFace (ArcFace model).
+
+    The pipeline runs two attempts:
+      1. Enhanced — upscale ID photo + denoise + CLAHE contrast + normalize brightness
+      2. Raw     — original images with no preprocessing
+
+    The best result (lowest distance) is returned.
+    The `preprocessing` field in the response shows which attempt won.
     """
     try:
         id_img     = decode_base64_image(body.id_image_base64)
@@ -38,5 +45,6 @@ def compare_faces(body: FaceCompareRequest):
         threshold=result["threshold"],
         model=result["model"],
         similarity_score=result["similarity_score"],
+        preprocessing=result.get("preprocessing"),
         error=result.get("error"),
     )

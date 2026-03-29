@@ -83,6 +83,10 @@ class FaceResult(BaseModel):
     threshold: float
     model: str
     similarity_score: float
+    preprocessing: Optional[str] = Field(
+        None,
+        description="Which preprocessing attempt produced this result: 'enhanced' or 'raw'"
+    )
     error: Optional[str] = None
 
 

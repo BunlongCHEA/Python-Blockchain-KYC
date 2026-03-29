@@ -130,3 +130,26 @@ More Detail info from above Diagram:
             │   (all context) │
             └─────────────────┘
 ```
+
+## 2. Structure & Process Verify Face - DeepFace
+
+```bash
+┌─────────────────────┐         ┌─────────────────────┐
+│    ID CARD PHOTO     │         │       SELFIE         │
+│                      │         │                      │
+│  ┌──────────┐        │         │        ┌──────────┐  │
+│  │  Small   │        │         │        │  Large   │  │
+│  │  ~80×100 │ ← low  │         │        │ ~400×500 │  │
+│  │  pixels  │   res   │         │        │  pixels  │  │
+│  └──────────┘        │         │        └──────────┘  │
+│  - Printed/laminated │         │  - Natural lighting   │
+│  - Flat lighting     │         │  - 3D perspective     │
+│  - Possibly faded    │         │  - Camera distortion  │
+│  - Scanned through   │         │  - Different angle    │
+│    camera lens       │         │  - Years older/younger│
+└─────────────────────┘         └─────────────────────┘
+         │                                │
+         └──── Distance = 0.55 ───────────┘
+               (barely passing 0.68 threshold)
+```
+
