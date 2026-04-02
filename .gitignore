@@ -5,3 +5,5 @@ ocr/__pycache__
 routers/__pycache__
 utils/__pycache__
 .env
+gfpgan/
+models_pretrained/

@@ -46,5 +46,6 @@ def compare_faces(body: FaceCompareRequest):
         model=result["model"],
         similarity_score=result["similarity_score"],
         preprocessing=result.get("preprocessing"),
+        device=result.get("device"),
         error=result.get("error"),
     )

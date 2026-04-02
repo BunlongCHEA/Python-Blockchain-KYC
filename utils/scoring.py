@@ -43,9 +43,9 @@ def compute_overall_score(
 
     if has_selfie:
         score = round(min(
-            ocr_confidence  * 100 * 0.35    # e.g. 0.75 → 75 → 26.25
-            + face_similarity     * 0.40    # e.g. 13.69 → 5.48  (low match)
-            + db_match_score * 100 * 0.25,  # e.g. 0.67 → 67 → 16.75
+            ocr_confidence  * 100 * 0.35
+            + face_similarity     * 0.40
+            + db_match_score * 100 * 0.25,
             100.0,
         ), 2)
     else:

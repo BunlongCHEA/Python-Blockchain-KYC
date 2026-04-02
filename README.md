@@ -1,8 +1,37 @@
 # I. Install Python Libs
+## 1. Run Install Python Libs
 
 ```bash
 pip install -r requirements.txt
 ```
+
+## 2. Install PyTorch to support GPU
+
+```bash
+pip uninstall torch torchvision torchaudio -y
+```
+
+```bash
+# Install with CUDA 12.8
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
+
+#OR to find Compatible with your GPU
+
+pip install torch==2.4.1 torchvision==0.19.1 torchaudio==2.4.1 --index-url https://download.pytorch.org/whl/cu121
+```
+
+Verify
+
+```bash
+python -c "import torch; print('PyTorch:', torch.__version__); print('CUDA:', torch.cuda.is_available()); print('GPU:', torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'None')"
+
+python -c "import torch; print('PyTorch:', torch.__version__); print('CUDA:', torch.cuda.is_available()); print('GPU:', torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'None')"
+
+python -c "import torch; print('Version:', torch.__version__); print('CUDA built:', torch.version.cuda); print('Available:', torch.cuda.is_available())"
+
+python -c "import torch; print('PyTorch:', torch.__version__); print('CUDA built with:', torch.version.cuda); print('CUDA available:', torch.cuda.is_available()); print('GPU:', torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'None')"
+```
+
 
 # II. Structure Project and Details
 
@@ -153,3 +182,110 @@ More Detail info from above Diagram:
                (barely passing 0.68 threshold)
 ```
 
+This is detail process for Verify Face
+
+```bash
+  ID Card Photo                          Selfie Photo
+       │                                      │
+       ▼                                      ▼
+┌─────────────────┐                  ┌──────────────────┐
+│ Attempt 1       │                  │ Normalize        │
+│ GFPGAN          │──── if fail ───▶ │ Brightness       │
+│ (AI face restore│                  │ (shared across   │
+│  neural net)    │                  │  attempts 1-3)   │
+└────────┬────────┘                  └────────┬─────────┘
+         │                                    │
+         ▼                                    │
+  ┌──────────────┐                            │
+  │ DeepFace     │◄───────────────────────────┘
+  │ ArcFace      │
+  │ distance=?   │
+  └──────┬───────┘
+         │
+         ▼
+┌─────────────────┐
+│ Attempt 2       │
+│ Real-ESRGAN     │──── if fail ───▶ skip
+│ (AI upscale)    │
+│ + OpenCV enhance│
+│ + normalize     │
+└────────┬────────┘
+         │
+         ▼
+  ┌──────────────┐
+  │ DeepFace     │
+  │ distance=?   │
+  └──────┬───────┘
+         │
+         ▼
+┌─────────────────┐
+│ Attempt 3       │
+│ OpenCV only     │
+│ upscale +       │
+│ CLAHE + denoise │
+│ + sharpen +     │
+│ normalize       │
+└────────┬────────┘
+         │
+         ▼
+  ┌──────────────┐
+  │ DeepFace     │
+  │ distance=?   │
+  └──────┬───────┘
+         │
+         ▼
+┌─────────────────┐
+│ Attempt 4       │
+│ RAW             │
+│ (no processing) │
+│                 │
+│ id_img as-is    │──────────────────┐
+│ selfie as-is    │──────��───────┐   │
+└────────┬────────┘              │   │
+         │                       │   │
+         ▼                       ▼   ▼
+  ┌──────────────────────────────────────┐
+  │ DeepFace.verify(                     │
+  │   img1_path = id_img (original)      │
+  │   img2_path = selfie (original)      │
+  │   model     = ArcFace                │
+  │   detector  = RetinaFace             │
+  │   enforce_detection = False          │
+  │   align     = True                   │
+  │ )                                    │
+  └──────────────┬───────────────────────┘
+                 │
+                 ▼
+  ┌──────────────────────────────────────┐
+  │ Result:                              │
+  │   distance  = ~0.72 (worst of all)   │
+  │   threshold = 0.68                   │
+  │   verified  = False (0.72 > 0.68)    │
+  │   label     = "raw"                  │
+  └──────────────┬───────────────────────┘
+                 │
+                 ▼
+  ┌──────────────────────────────────────┐
+  │ Compare all 4 attempts               │
+  │ Pick LOWEST distance                 │
+  │                                      │
+  │  gfpgan_restored:     0.35  ← BEST  │
+  │  realesrgan_enhanced: 0.42           │
+  │  opencv_enhanced:     0.61           │
+  │  raw:                 0.72  ← WORST  │
+  │                                      │
+  │ Winner: gfpgan_restored              │
+  └──────────────────────────────────────┘
+```
+
+Process of Verify Face:
+
+| Area | Before | After |
+| :--- | :--- | :--- |
+| **ID photo size** | Sent as-is (~80×100px from card) | `_upscale_if_small()` → scales up to 250px minimum |
+| **ID photo quality** | Raw scanned-through-camera image | `_enhance_id_photo()` → denoise + CLAHE contrast + sharpen |
+| **Brightness mismatch** | Studio ID vs. natural selfie lighting | `_normalize_brightness()` → both images normalized to same mean luminance |
+| **Alignment** | `align` not set (default varies) | `align=True` explicitly → 5-point landmark alignment guaranteed |
+| **Retry strategy** | Single attempt, take or leave | 2 attempts — enhanced first, raw fallback. Best (lowest distance) wins |
+| **Manual face crop** | N/A | Not added — RetinaFace already handles this better internally |
+| **Response** | No info about preprocessing | New "preprocessing" field shows which attempt won ("enhanced" or "raw") |

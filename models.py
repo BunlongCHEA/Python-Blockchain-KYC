@@ -87,6 +87,9 @@ class FaceResult(BaseModel):
         None,
         description="Which preprocessing attempt produced this result: 'enhanced' or 'raw'"
     )
+    device: Optional[str] = Field(
+        None, description="Which device was used for verification: 'gpu' or 'cpu'"
+    )
     error: Optional[str] = None
 
 
