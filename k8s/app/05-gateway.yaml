@@ -54,10 +54,10 @@ spec:
       port: 443
       tls:
         mode: Terminate
-        # certificateRefs:
-        #   - kind: Secret
-        #     name: kyc-python-tls-staging
-        #     namespace: kyc-blockchain
+        certificateRefs:
+          - kind: Secret
+            name: kyc-python-tls-staging
+            namespace: kyc-blockchain
       allowedRoutes:
         namespaces:
           from: Same
