@@ -1,0 +1,20 @@
+# =============================================================
+# cert-manager Certificate — requests TLS cert from Let's Encrypt staging
+# Creates secret: kyc-python-tls-staging in kyc-blockchain namespace
+# Gateway listener references this secret in 05-gateway.yaml
+# =============================================================
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: kyc-python-tls-staging
+  namespace: kyc-blockchain
+  labels:
+    app.kubernetes.io/name: kyc-python
+spec:
+  secretName: kyc-python-tls-staging        # ← must match 05-gateway.yaml tls.certificateRefs.name
+  issuerRef:
+    name: letsencrypt-staging
+    kind: ClusterIssuer
+  dnsNames:
+    - "kyc-python-api.bunlong.uk"
+  # cert-manager will auto-renew before expiry (default 30 days before)
