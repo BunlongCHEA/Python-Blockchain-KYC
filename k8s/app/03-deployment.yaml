@@ -43,7 +43,8 @@ spec:
             - name: POSTGRES_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: kyc-python-secrets
+                  # name: kyc-python-secrets
+                  name: postgres-secret
                   key: POSTGRES_PASSWORD
             - name: GOOGLE_APPLICATION_CREDENTIALS_BASE64
               valueFrom:
@@ -103,9 +104,9 @@ spec:
                 - ALL
             
           volumeMounts:
-          - name: deepface-home
-            mountPath: /app/.deepface
+            - name: deepface-home
+              mountPath: /app/.deepface
 
-    volumes:
-      - name: deepface-home
-        emptyDir: {}
+      volumes:
+        - name: deepface-home
+          emptyDir: {}
