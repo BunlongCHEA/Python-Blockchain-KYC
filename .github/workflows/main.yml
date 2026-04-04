@@ -202,6 +202,13 @@ jobs:
       - name: Apply ArgoCD application manifest
         run: |
           echo "Applying ArgoCD application..."
+          
+          if [ ! -d "k8s/argocd/app/" ]; then
+            echo "⚠️  k8s/argocd/app/ not found in repo — skipping."
+            echo "Please commit the ArgoCD manifests first."
+            exit 0
+          fi
+
           kubectl apply -f k8s/argocd/app/
           echo "✓ ArgoCD Application manifest applied"
 
