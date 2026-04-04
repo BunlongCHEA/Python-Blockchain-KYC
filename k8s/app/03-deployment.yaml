@@ -51,6 +51,10 @@ spec:
                   name: kyc-python-secrets
                   key: GOOGLE_APPLICATION_CREDENTIALS_BASE64
                   optional: true
+            # DeepFace writes to /.deepface by default (root-only) ──
+            # Redirect to a writable emptyDir volume under /app
+            - name: DEEPFACE_HOME
+              value: "/app/.deepface"
 
           # ── Health probes (/health is defined in main.py) ───────────
           livenessProbe:
@@ -97,3 +101,11 @@ spec:
             capabilities:
               drop:
                 - ALL
+            
+          volumeMounts:
+          - name: deepface-home
+            mountPath: /app/.deepface
+
+    volumes:
+      - name: deepface-home
+        emptyDir: {}

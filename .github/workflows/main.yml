@@ -126,7 +126,10 @@ jobs:
     runs-on: ubuntu-latest
     needs: build
     # ── Runs only when manually triggered AND run_deploy=true ─────────────
-    if: github.event_name == 'workflow_dispatch' && github.event.inputs.run_deploy == 'true'
+    # if: github.event_name == 'workflow_dispatch' && github.event.inputs.run_deploy == 'true'
+
+    # auto on push to main, skip on PR:
+    if: github.event_name != 'pull_request'
     # environment: production
 
     steps:
