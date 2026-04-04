@@ -117,120 +117,120 @@ jobs:
           echo "| Trigger | \`${{ github.event_name }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| SHA | \`${{ github.sha }}\` |" >> $GITHUB_STEP_SUMMARY
 
-  # ══════════════════════════════════════════════════════════════════════
-  # JOB 2: Setup Cluster — install CRDs & controllers (idempotent)
-  # Runs once before deploy. Safe to re-run — all steps use apply/upgrade.
-  # Installs:
-  #   1. Gateway API CRDs       (for 05-gateway.yaml)
-  #   2. Traefik Gateway API    (enable kubernetesGateway in Traefik)
-  #   3. cert-manager           (for 07-clusterissuer.yaml TLS)
-  # ══════════════════════════════════════════════════════════════════════
-  setup-cluster:
-    name: Setup Cluster Prerequisites
-    runs-on: ubuntu-latest
-    needs: build
-    if: github.event_name != 'pull_request'
+  # # ══════════════════════════════════════════════════════════════════════
+  # # JOB 2: Setup Cluster — install CRDs & controllers (idempotent)
+  # # Runs once before deploy. Safe to re-run — all steps use apply/upgrade.
+  # # Installs:
+  # #   1. Gateway API CRDs       (for 05-gateway.yaml)
+  # #   2. Traefik Gateway API    (enable kubernetesGateway in Traefik)
+  # #   3. cert-manager           (for 07-clusterissuer.yaml TLS)
+  # # ══════════════════════════════════════════════════════════════════════
+  # setup-cluster:
+  #   name: Setup Cluster Prerequisites
+  #   runs-on: ubuntu-latest
+  #   needs: build
+  #   if: github.event_name != 'pull_request'
 
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+  #   steps:
+  #     - name: Checkout repository
+  #       uses: actions/checkout@v4
 
-      - name: Install kubectl & helm
-        uses: azure/setup-kubectl@v4
-        with:
-          version: "latest"
+  #     - name: Install kubectl & helm
+  #       uses: azure/setup-kubectl@v4
+  #       with:
+  #         version: "latest"
 
-      - name: Install Helm
-        uses: azure/setup-helm@v4
-        with:
-          version: "latest"
+  #     - name: Install Helm
+  #       uses: azure/setup-helm@v4
+  #       with:
+  #         version: "latest"
 
-      - name: Configure kubeconfig
-        run: |
-          if [ -z "${{ secrets.KUBE_CONFIG_BASE64 }}" ]; then
-            echo "ERROR: KUBE_CONFIG_BASE64 is not set!"
-            exit 1
-          fi
-          mkdir -p ~/.kube
-          echo "${{ secrets.KUBE_CONFIG_BASE64 }}" | base64 -d > ~/.kube/config
-          chmod 600 ~/.kube/config
-          echo "✓ Kubeconfig decoded"
+  #     - name: Configure kubeconfig
+  #       run: |
+  #         if [ -z "${{ secrets.KUBE_CONFIG_BASE64 }}" ]; then
+  #           echo "ERROR: KUBE_CONFIG_BASE64 is not set!"
+  #           exit 1
+  #         fi
+  #         mkdir -p ~/.kube
+  #         echo "${{ secrets.KUBE_CONFIG_BASE64 }}" | base64 -d > ~/.kube/config
+  #         chmod 600 ~/.kube/config
+  #         echo "✓ Kubeconfig decoded"
 
-      # ── 1. Gateway API CRDs ───────────────────────────────────────────────
-      # Required by 05-gateway.yaml (GatewayClass, Gateway, HTTPRoute)
-      # safe to re-apply — kubectl apply is idempotent
-      - name: Install Gateway API CRDs
-        run: |
-          echo "Installing Gateway API CRDs (standard channel)..."
-          kubectl apply -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.2.0/standard-install.yaml
-          echo "✓ Gateway API CRDs applied"
+  #     # ── 1. Gateway API CRDs ───────────────────────────────────────────────
+  #     # Required by 05-gateway.yaml (GatewayClass, Gateway, HTTPRoute)
+  #     # safe to re-apply — kubectl apply is idempotent
+  #     - name: Install Gateway API CRDs
+  #       run: |
+  #         echo "Installing Gateway API CRDs (standard channel)..."
+  #         kubectl apply -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.2.0/standard-install.yaml
+  #         echo "✓ Gateway API CRDs applied"
 
-      # ── 2. Traefik — enable kubernetesGateway ─────────────────────────────
-      # Required so Traefik acts as the GatewayClass controller
-      # Uses Helm upgrade --install (idempotent)
-      - name: Enable Traefik Gateway API support
-        run: |
-          echo "Checking current Traefik install..."
-          helm repo add traefik https://traefik.github.io/charts
-          helm repo update
+  #     # ── 2. Traefik — enable kubernetesGateway ─────────────────────────────
+  #     # Required so Traefik acts as the GatewayClass controller
+  #     # Uses Helm upgrade --install (idempotent)
+  #     - name: Enable Traefik Gateway API support
+  #       run: |
+  #         echo "Checking current Traefik install..."
+  #         helm repo add traefik https://traefik.github.io/charts
+  #         helm repo update
 
-          # ── Adopt existing GatewayClass into Helm ownership ──────────────
-          # Helm requires these labels/annotations to manage existing resources.
-          # kubectl annotate/label --overwrite is idempotent — safe every run.
-          if kubectl get gatewayclass traefik >/dev/null 2>&1; then
-            echo "Adopting existing GatewayClass traefik into Helm..."
-            kubectl label gatewayclass traefik \
-              app.kubernetes.io/managed-by=Helm \
-              --overwrite
-            kubectl annotate gatewayclass traefik \
-              meta.helm.sh/release-name=traefik \
-              meta.helm.sh/release-namespace=kube-system \
-              --overwrite
-            echo "✓ GatewayClass adopted"
-          fi
+  #         # ── Adopt existing GatewayClass into Helm ownership ──────────────
+  #         # Helm requires these labels/annotations to manage existing resources.
+  #         # kubectl annotate/label --overwrite is idempotent — safe every run.
+  #         if kubectl get gatewayclass traefik >/dev/null 2>&1; then
+  #           echo "Adopting existing GatewayClass traefik into Helm..."
+  #           kubectl label gatewayclass traefik \
+  #             app.kubernetes.io/managed-by=Helm \
+  #             --overwrite
+  #           kubectl annotate gatewayclass traefik \
+  #             meta.helm.sh/release-name=traefik \
+  #             meta.helm.sh/release-namespace=kube-system \
+  #             --overwrite
+  #           echo "✓ GatewayClass adopted"
+  #         fi
 
-          # ── Upgrade or fresh install ──────────────────────────────────────
-          if helm list -n kube-system | grep -q "^traefik"; then
-            echo "Upgrading existing Traefik install..."
-            helm upgrade traefik traefik/traefik \
-              --namespace kube-system \
-              --reset-then-reuse-values \
-              --set providers.kubernetesGateway.enabled=true \
-              --wait --timeout 120s
-          else
-            echo "Fresh Traefik install..."
-            helm install traefik traefik/traefik \
-              --namespace kube-system \
-              --create-namespace \
-              --set providers.kubernetesGateway.enabled=true \
-              --wait --timeout 120s
-          fi
+  #         # ── Upgrade or fresh install ──────────────────────────────────────
+  #         if helm list -n kube-system | grep -q "^traefik"; then
+  #           echo "Upgrading existing Traefik install..."
+  #           helm upgrade traefik traefik/traefik \
+  #             --namespace kube-system \
+  #             --reset-then-reuse-values \
+  #             --set providers.kubernetesGateway.enabled=true \
+  #             --wait --timeout 120s
+  #         else
+  #           echo "Fresh Traefik install..."
+  #           helm install traefik traefik/traefik \
+  #             --namespace kube-system \
+  #             --create-namespace \
+  #             --set providers.kubernetesGateway.enabled=true \
+  #             --wait --timeout 120s
+  #         fi
 
-          echo "✓ Traefik Gateway API enabled"
+  #         echo "✓ Traefik Gateway API enabled"
 
-      # ── 3. cert-manager ───────────────────────────────────────────────────
-      # Required by 07-clusterissuer.yaml (Let's Encrypt TLS)
-      - name: Install cert-manager
-        run: |
-          echo "Installing cert-manager..."
-          kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.16.0/cert-manager.yaml
+  #     # ── 3. cert-manager ───────────────────────────────────────────────────
+  #     # Required by 07-clusterissuer.yaml (Let's Encrypt TLS)
+  #     - name: Install cert-manager
+  #       run: |
+  #         echo "Installing cert-manager..."
+  #         kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.16.0/cert-manager.yaml
 
-          echo "Waiting for cert-manager webhooks to be ready..."
-          kubectl wait --for=condition=Available deployment/cert-manager \
-            -n cert-manager --timeout=120s
-          kubectl wait --for=condition=Available deployment/cert-manager-webhook \
-            -n cert-manager --timeout=120s
+  #         echo "Waiting for cert-manager webhooks to be ready..."
+  #         kubectl wait --for=condition=Available deployment/cert-manager \
+  #           -n cert-manager --timeout=120s
+  #         kubectl wait --for=condition=Available deployment/cert-manager-webhook \
+  #           -n cert-manager --timeout=120s
 
-          echo "✓ cert-manager ready"
+  #         echo "✓ cert-manager ready"
 
-      - name: Setup summary
-        run: |
-          echo "## 🔧 Cluster Setup Complete" >> $GITHUB_STEP_SUMMARY
-          echo "| Component | Status |" >> $GITHUB_STEP_SUMMARY
-          echo "|-----------|--------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Gateway API CRDs v1.2.0 | ✅ Applied |" >> $GITHUB_STEP_SUMMARY
-          echo "| Traefik kubernetesGateway | ✅ Enabled |" >> $GITHUB_STEP_SUMMARY
-          echo "| cert-manager v1.16.0 | ✅ Ready |" >> $GITHUB_STEP_SUMMARY
+  #     - name: Setup summary
+  #       run: |
+  #         echo "## 🔧 Cluster Setup Complete" >> $GITHUB_STEP_SUMMARY
+  #         echo "| Component | Status |" >> $GITHUB_STEP_SUMMARY
+  #         echo "|-----------|--------|" >> $GITHUB_STEP_SUMMARY
+  #         echo "| Gateway API CRDs v1.2.0 | ✅ Applied |" >> $GITHUB_STEP_SUMMARY
+  #         echo "| Traefik kubernetesGateway | ✅ Enabled |" >> $GITHUB_STEP_SUMMARY
+  #         echo "| cert-manager v1.16.0 | ✅ Ready |" >> $GITHUB_STEP_SUMMARY
   
   # ══════════════════════════════════════════════════════════════════════
   # JOB 3: Deploy — Apply ArgoCD app & sync (manual trigger only)
@@ -239,7 +239,8 @@ jobs:
   deploy:
     name: Deploy to Kubernetes & Sync ArgoCD
     runs-on: ubuntu-latest
-    needs: [build, setup-cluster]
+    needs: build
+    # needs: [build, setup-cluster]
     # ── Runs only when manually triggered AND run_deploy=true ─────────────
     # if: github.event_name == 'workflow_dispatch' && github.event.inputs.run_deploy == 'true'
 
