@@ -174,17 +174,22 @@ jobs:
           helm repo add traefik https://traefik.github.io/charts
           helm repo update
 
-          # Get current Traefik chart version installed in cluster
-          CURRENT_VERSION=$(helm list -n kube-system -o json \
-            | python3 -c "import sys,json; items=json.load(sys.stdin); \
-              match=[i for i in items if i['name']=='traefik']; \
-              print(match[0]['chart'] if match else '')" 2>/dev/null || echo "")
+          # ── Adopt existing GatewayClass into Helm ownership ──────────────
+          # Helm requires these labels/annotations to manage existing resources.
+          # kubectl annotate/label --overwrite is idempotent — safe every run.
+          if kubectl get gatewayclass traefik >/dev/null 2>&1; then
+            echo "Adopting existing GatewayClass traefik into Helm..."
+            kubectl label gatewayclass traefik \
+              app.kubernetes.io/managed-by=Helm \
+              --overwrite
+            kubectl annotate gatewayclass traefik \
+              meta.helm.sh/release-name=traefik \
+              meta.helm.sh/release-namespace=kube-system \
+              --overwrite
+            echo "✓ GatewayClass adopted"
+          fi
 
-          echo "Current Traefik: ${CURRENT_VERSION:-not installed}"
-
-          # Use --reset-then-reuse-values (Helm 3.14+) to drop removed keys
-          # then layer only the Gateway API flag on top.
-          # Falls back to --set only if Traefik is not yet installed.
+          # ── Upgrade or fresh install ──────────────────────────────────────
           if helm list -n kube-system | grep -q "^traefik"; then
             echo "Upgrading existing Traefik install..."
             helm upgrade traefik traefik/traefik \
