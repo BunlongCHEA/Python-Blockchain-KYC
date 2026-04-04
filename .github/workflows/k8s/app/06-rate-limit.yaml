@@ -1,0 +1,61 @@
+# =============================================================
+# Python KYC AI Service — Rate Limit + CORS Middleware
+# =============================================================
+# Mirror of Go-Blockchain-KYC/k8s/app/10-rate-limit.yaml
+# CORS is restricted to Go KYC backend only (kycapi.bunlong.uk)
+# so no browser or third-party can call this API directly.
+# =============================================================
+
+# ── Rate Limit Middleware ─────────────────────────────────────────────────────
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: ratelimit
+  namespace: kyc-blockchain
+spec:
+  rateLimit:
+    average: 60      # lower than Go API — AI inference is expensive
+    period: 1m
+    burst: 20
+
+---
+# ── CORS Middleware — allow ONLY Go KYC backend ───────────────────────────────
+# kycapi.bunlong.uk  = Go-Blockchain-KYC API (the only permitted caller)
+# All browser/direct requests will be rejected by CORS policy.
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: cors-headers
+  namespace: kyc-blockchain
+spec:
+  headers:
+    accessControlAllowMethods:
+      - GET
+      - POST
+      - OPTIONS
+    accessControlAllowOriginList:
+      - "https://kycapi.bunlong.uk"       # Go KYC backend — only allowed origin
+    accessControlAllowHeaders:
+      - Authorization
+      - Content-Type
+      - X-Request-ID
+    accessControlExposeHeaders:
+      - X-Request-ID
+    accessControlMaxAge: 86400
+    accessControlAllowCredentials: true
+
+---
+# ── Middleware Chain — apply both in order ────────────────────────────────────
+# Referenced in 05-gateway.yaml HTTPRoute annotation:
+#   kyc-python-ratelimit@kubernetescrd
+#   kyc-python-cors-headers@kubernetescrd
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: kyc-python-chain
+  namespace: kyc-blockchain
+spec:
+  chain:
+    middlewares:
+      - name: ratelimit
+      - name: cors-headers

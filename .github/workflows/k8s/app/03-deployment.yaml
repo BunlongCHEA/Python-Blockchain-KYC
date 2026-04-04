@@ -1,0 +1,99 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kyc-python
+  namespace: kyc-blockchain
+  labels:
+    app.kubernetes.io/name: kyc-python
+    app.kubernetes.io/version: "1.0.0"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: kyc-python
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: kyc-python
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+
+      containers:
+        - name: kyc-python
+          # CPU image (default):  ghcr.io/bunlongchea/kyc-python-api:latest
+          # GPU image:            ghcr.io/bunlongchea/kyc-python-api:latest-gpu
+          image: ghcr.io/bunlongchea/kyc-python-api:latest # {"$imagepolicy": "argocd-image-updater/kyc-python"}
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 5001
+              name: http
+              protocol: TCP
+
+          # ── Environment from ConfigMap (non-sensitive) ──────────────
+          envFrom:
+            - configMapRef:
+                name: kyc-python-config
+
+          # ── Sensitive values injected from Secret ───────────────────
+          env:
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: kyc-python-secrets
+                  key: POSTGRES_PASSWORD
+            - name: GOOGLE_APPLICATION_CREDENTIALS_BASE64
+              valueFrom:
+                secretKeyRef:
+                  name: kyc-python-secrets
+                  key: GOOGLE_APPLICATION_CREDENTIALS_BASE64
+                  optional: true
+
+          # ── Health probes (/health is defined in main.py) ───────────
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 5001
+            initialDelaySeconds: 60   # model loading takes time
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 3
+
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 5001
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+
+          # ── Resources ───────────────────────────────────────────────
+          # CPU build: smaller footprint
+          # GPU build: increase limits and add nvidia.com/gpu: 1
+          resources:
+            requests:
+              memory: "1Gi"
+              cpu: "500m"
+            limits:
+              memory: "4Gi"
+              cpu: "2000m"
+          # GPU build — uncomment below and change image to latest-gpu:
+          # resources:
+          #   requests:
+          #     memory: "2Gi"
+          #     cpu: "1000m"
+          #     nvidia.com/gpu: 1
+          #   limits:
+          #     memory: "8Gi"
+          #     cpu: "4000m"
+          #     nvidia.com/gpu: 1
+
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL

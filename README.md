@@ -289,3 +289,36 @@ Process of Verify Face:
 | **Retry strategy** | Single attempt, take or leave | 2 attempts — enhanced first, raw fallback. Best (lowest distance) wins |
 | **Manual face crop** | N/A | Not added — RetinaFace already handles this better internally |
 | **Response** | No info about preprocessing | New "preprocessing" field shows which attempt won ("enhanced" or "raw") |
+
+# III. CI/CD Architecture
+
+```bash
+GitHub Push → main
+      │
+      ▼
+.github/workflows/ci.yml
+  ├─ workflow_dispatch: USE_GPU=false → builds CPU → ghcr.io/.../kyc-python-api:latest
+  └─ workflow_dispatch: USE_GPU=true  → builds GPU → ghcr.io/.../kyc-python-api:latest-gpu
+      │
+      ▼  (image pushed to GHCR)
+ArgoCD watches GitHub repo
+      │
+      ▼
+k8s/argocd/app/kyc-python-application.yaml
+  └─ syncs k8s/app/ → namespace: kyc-python
+        ├─ 00-namespace.yaml
+        ├─ 01-secrets.yaml      (placeholder — real values via kubectl/Sealed Secrets)
+        ├─ 02-configmap.yaml    (USE_GPU, POSTGRES_HOST, etc.)
+        ├─ 03-deployment.yaml   (pulls ghcr.io image, injects Secret as env)
+        └─ 04-service.yaml      (ClusterIP :5001)
+```
+
+### Required GitHub Secrets
+
+Go to Settings → Secrets and variables → Actions and add:
+
+| Secret Name | Value |
+| :--- | :--- |
+| `KUBE_CONFIG_BASE64` | `cat ~/.kube/config \| base64 -w0` |
+| `POSTGRES_PASSWORD` | Input DB password |
+| `GOOGLE_CREDENTIALS_B64` | `cat service-account.json \| base64 -w0` (optional) |

@@ -1,0 +1,49 @@
+# =============================================================
+# Python KYC AI Service — ClusterIssuer (Staging Let's Encrypt)
+# =============================================================
+# Mirror of Go-Blockchain-KYC/k8s/app/13-clusterissuer.yaml
+#
+# Staging issuer = no rate limits, issues UNTRUSTED certs.
+# Use for testing TLS flow. Browser will show "Not Secure".
+# Switch to letsencrypt-prod when ready:
+#   server: https://acme-v02.api.letsencrypt.org/directory
+#   privateKeySecretRef.name: letsencrypt-prod-key
+#   cert-manager.io/cluster-issuer: "letsencrypt-prod"  in 05-gateway.yaml
+#
+# REQUIREMENTS:
+#   cert-manager installed:
+#   kubectl apply -f https://github.com/cert-manager/cert-manager/releases/latest/download/cert-manager.yaml
+# =============================================================
+
+# ── Staging (active) ──────────────────────────────────────────────────────────
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-staging
+spec:
+  acme:
+    server: https://acme-staging-v02.api.letsencrypt.org/directory
+    email: chea.bunlong.cloud2@gmail.com
+    privateKeySecretRef:
+      name: letsencrypt-staging-key    # same key name as Go project (shared ClusterIssuer)
+    solvers:
+      - http01:
+          ingress:
+            class: traefik
+
+---
+# ── Production (commented — uncomment when staging is verified) ───────────────
+# apiVersion: cert-manager.io/v1
+# kind: ClusterIssuer
+# metadata:
+#   name: letsencrypt-prod
+# spec:
+#   acme:
+#     server: https://acme-v02.api.letsencrypt.org/directory
+#     email: chea.bunlong.cloud2@gmail.com
+#     privateKeySecretRef:
+#       name: letsencrypt-prod-key
+#     solvers:
+#       - http01:
+#           ingress:
+#             class: traefik

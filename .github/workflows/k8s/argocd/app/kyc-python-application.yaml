@@ -1,0 +1,24 @@
+# ArgoCD Application for Python KYC AI Service
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: kyc-python-app
+  namespace: argocd
+spec:
+  project: default
+  # Source configuration
+  source:
+    repoURL: https://github.com/BunlongCHEA/Python-Blockchain-KYC.git
+    targetRevision: HEAD
+    path: k8s/app
+    directory:
+      recurse: true
+  # Destination cluster and namespace
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: kyc-blockchain
+  # Sync policy
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true

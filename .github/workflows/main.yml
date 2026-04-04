@@ -1,0 +1,227 @@
+name: CI — Build & Push Docker Image
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      use_gpu:
+        description: "Build GPU image? (true = CUDA, false = CPU)"
+        required: true
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository_owner }}/kyc-python-api
+  KUBE_NAMESPACE: kyc-blockchain
+
+jobs:
+  # ════════════════════════════════════════════════════════════════════
+  # JOB 1 — Build & Push Docker image to GHCR
+  # ════════════════════════════════════════════════════════════════════
+  build:
+    name: Build & Push (${{ github.event.inputs.use_gpu == 'true' && 'GPU' || 'CPU' }})
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image_tag: ${{ steps.tag.outputs.image_tag }}
+      use_gpu:   ${{ steps.gpu.outputs.use_gpu }}
+
+    steps:
+      # ── 1. Checkout ────────────────────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ── 2. Resolve USE_GPU ─────────────────────────────────────────────
+      # On push/PR: always CPU (false). On workflow_dispatch: use input.
+      - name: Resolve USE_GPU flag
+        id: gpu
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "use_gpu=${{ github.event.inputs.use_gpu }}" >> $GITHUB_OUTPUT
+          else
+            echo "use_gpu=false" >> $GITHUB_OUTPUT
+          fi
+
+      # ── 3. Set image tag ───────────────────────────────────────────────
+      - name: Set image tag
+        id: tag
+        run: |
+          if [ "${{ steps.gpu.outputs.use_gpu }}" = "true" ]; then
+            echo "image_tag=latest-gpu" >> $GITHUB_OUTPUT
+            echo "build_label=GPU (CUDA 12.1)" >> $GITHUB_OUTPUT
+          else
+            echo "image_tag=latest" >> $GITHUB_OUTPUT
+            echo "build_label=CPU" >> $GITHUB_OUTPUT
+          fi
+
+      # ── 4. Set up Docker Buildx ────────────────────────────────────────
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # ── 5. Log in to GHCR ─────────────────────────────────────────────
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # ── 6. Extract metadata (labels & tags) ───────────────────────────
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=${{ steps.tag.outputs.image_tag }}
+            type=sha,prefix=${{ steps.gpu.outputs.use_gpu == 'true' && 'gpu-' || 'cpu-' }}
+
+      # ── 7. Build & push ────────────────────────────────────────────────
+      - name: Build and push Docker image (${{ steps.tag.outputs.build_label }})
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          build-args: |
+            USE_GPU=${{ steps.gpu.outputs.use_gpu }}
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # ── 8. Summary ─────────────────────────────────────────────────────
+      - name: Job summary
+        run: |
+          echo "## ✅ Build Complete" >> $GITHUB_STEP_SUMMARY
+          echo "| Key | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Image | \`${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.tag.outputs.image_tag }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| USE_GPU | \`${{ steps.gpu.outputs.use_gpu }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Trigger | \`${{ github.event_name }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| SHA | \`${{ github.sha }}\` |" >> $GITHUB_STEP_SUMMARY
+  
+  # ══════════════════════════════════════════════════════════════════════
+  # JOB 2: Deploy — Apply ArgoCD app & sync (manual trigger only)
+  # Mirrors Go project .gitlab-ci.yml deploy stage (when: manual)
+  # ══════════════════════════════════════════════════════════════════════
+  deploy:
+    name: Deploy to Kubernetes & Sync ArgoCD
+    runs-on: ubuntu-latest
+    needs: build
+    # ── Manual only — equivalent to GitLab `when: manual` ──────────────
+    if: github.event_name == 'workflow_dispatch'
+    # environment: production
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ── Setup kubectl (same image as Go CI: alpine/k8s) ────────────────
+      - name: Install kubectl
+        uses: azure/setup-kubectl@v4
+        with:
+          version: "latest"
+
+      # ── Decode kubeconfig (same as Go CI: base64 -d) ──────────────────
+      - name: Configure kubeconfig
+        run: |
+          echo "Setting up kubectl..."
+
+          if [ -z "${{ secrets.KUBE_CONFIG_BASE64 }}" ]; then
+            echo "ERROR: KUBE_CONFIG_BASE64 is not set!"
+            echo "Please add it to GitHub repository Secrets"
+            exit 1
+          fi
+
+          mkdir -p ~/.kube
+          echo "${{ secrets.KUBE_CONFIG_BASE64 }}" | base64 -d > ~/.kube/config
+          chmod 600 ~/.kube/config
+
+          if [ ! -s ~/.kube/config ]; then
+            echo "ERROR: Kubeconfig is empty after decoding!"
+            exit 1
+          fi
+
+          echo "✓ Kubeconfig decoded successfully"
+
+      # ── Verify cluster connection (same as Go CI) ──────────────────────
+      - name: Test cluster connection
+        run: |
+          echo "Testing connection to K3s cluster..."
+          kubectl version --client
+          kubectl cluster-info
+          kubectl get nodes
+
+      # ── Create namespace if not exists (same pattern as Go CI) ────────
+      - name: Ensure namespace exists
+        run: |
+          kubectl create namespace ${{ env.KUBE_NAMESPACE }} \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+      # ── Create GHCR pull secret (equivalent to Go CI gitlab-registry) ──
+      - name: Create GHCR image pull secret
+        run: |
+          kubectl create secret docker-registry ghcr-secret \
+            --docker-server=ghcr.io \
+            --docker-username=${{ github.actor }} \
+            --docker-password=${{ secrets.GITHUB_TOKEN }} \
+            --docker-email=${{ github.actor }}@users.noreply.github.com \
+            -n ${{ env.KUBE_NAMESPACE }} \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+      # ── Sync K8s secrets from GitHub Secrets ──────────────────────────
+      # --from-literal=POSTGRES_PASSWORD="${{ secrets.POSTGRES_PASSWORD }}" \
+      - name: Sync application secrets to cluster
+        run: |
+          echo "Syncing kyc-python-secrets..."
+          kubectl create secret generic kyc-python-secrets \
+            --from-literal=GOOGLE_APPLICATION_CREDENTIALS_BASE64="${{ secrets.GOOGLE_CREDENTIALS_B64 }}" \
+            --namespace=${{ env.KUBE_NAMESPACE }} \
+            --dry-run=client -o yaml | kubectl apply -f -
+          echo "✓ Secrets synced"
+
+      # ── Apply ArgoCD Application manifest (kubectl apply -f) ──────────
+      # Equivalent to Go CI: kubectl apply -f k8s/argocd/app/
+      - name: Apply ArgoCD application manifest
+        run: |
+          echo "Applying ArgoCD application..."
+          kubectl apply -f k8s/argocd/app/
+          echo "✓ ArgoCD Application manifest applied"
+
+      # ── Wait for ArgoCD to register (same as Go CI: sleep 5) ──────────
+      - name: Wait for ArgoCD to register application
+        run: sleep 5
+
+      # ── Trigger ArgoCD sync (kubectl patch) ───────────────────────────
+      # Mirrors Go CI: kubectl patch application kyc-blockchain-app -n argocd ...
+      - name: Sync ArgoCD application
+        run: |
+          if kubectl get application kyc-python-app -n argocd >/dev/null 2>&1; then
+            echo "Syncing kyc-python-app application..."
+            kubectl patch application kyc-python-app -n argocd \
+              --type merge \
+              -p '{"operation":{"sync":{"syncStrategy":{"apply":{"force":true}}}}}' || true
+            echo "✓ ArgoCD sync triggered"
+          else
+            echo "kyc-python-app not found in argocd namespace, skipping sync"
+          fi
+
+      - name: Deploy summary
+        run: |
+          echo "## 🚀 Deploy Complete" >> $GITHUB_STEP_SUMMARY
+          echo "| Resource | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Namespace \`${{ env.KUBE_NAMESPACE }}\` | ✅ Ensured |" >> $GITHUB_STEP_SUMMARY
+          echo "| \`ghcr-secret\` | ✅ Applied |" >> $GITHUB_STEP_SUMMARY
+          echo "| \`kyc-python-secrets\` | ✅ Synced |" >> $GITHUB_STEP_SUMMARY
+          echo "| ArgoCD Application \`kyc-python-app\` | ✅ Applied & Synced |" >> $GITHUB_STEP_SUMMARY

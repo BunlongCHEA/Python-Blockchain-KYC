@@ -1,0 +1,41 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kyc-python-config
+  namespace: kyc-blockchain
+  labels:
+    app.kubernetes.io/name: kyc-python
+data:
+  # ── Server ────────────────────────────────────────────
+  HOST: "0.0.0.0"
+  PORT: "5001"
+  DEBUG: "false"
+
+  # ── PostgreSQL (non-sensitive) ────────────────────────
+  POSTGRES_HOST: "postgres-service"
+  POSTGRES_PORT: "5432"
+  POSTGRES_DB: "kyc_blockchain"
+  POSTGRES_USER: "postgres"
+  # POSTGRES_PASSWORD is injected from kyc-python-secrets
+
+  # ── GPU Acceleration ──────────────────────────────────
+  # Set USE_GPU=true only if the node has an NVIDIA GPU
+  # and the GPU image (latest-gpu) is deployed.
+  USE_GPU: "false"
+  OCR_GPU: "false"
+
+  # ── DeepFace ──────────────────────────────────────────
+  FACE_MODEL: "ArcFace"
+  FACE_DETECTOR: "retinaface"
+  FACE_THRESHOLD: "0.68"
+
+  # ── OCR ───────────────────────────────────────────────
+  OCR_LANGUAGES: "khm+eng"
+
+  # ── Scoring thresholds ────────────────────────────────
+  SCORE_VERIFIED: "60"
+  SCORE_NEEDS_REVIEW: "40"
+
+  # ── Model paths (baked into image at /app/models_pretrained) ──
+  GFPGAN_MODEL_PATH: "/app/models_pretrained/GFPGANv1.4.pth"
+  REALESRGAN_MODEL_PATH: "/app/models_pretrained/RealESRGAN_x2plus.pth"

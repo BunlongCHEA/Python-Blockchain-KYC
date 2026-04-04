@@ -11,6 +11,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from config import settings
 from routers import scan, face, verify
 
+from prometheus_fastapi_instrumentator import Instrumentator
+
 app = FastAPI(
     title="KYC AI Verification API",
     description=(
@@ -22,6 +24,11 @@ app = FastAPI(
     redoc_url="/redoc",
 )
 
+
+# ── Monitoring ────────────────────────────────────────────────────────────────
+Instrumentator().instrument(app).expose(app)
+
+
 # ── CORS ──────────────────────────────────────────────────────────────────────
 app.add_middleware(
     CORSMiddleware,
@@ -30,6 +37,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 
 # ── Routers ───────────────────────────────────────────────────────────────────
 app.include_router(scan.router)

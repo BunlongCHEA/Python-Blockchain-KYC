@@ -1,0 +1,135 @@
+# =============================================================
+# Python KYC AI Service — ServiceMonitor + PrometheusRule
+# =============================================================
+# Mirror of Go-Blockchain-KYC/k8s/app/12-monitoring.yaml
+#
+# REQUIREMENTS:
+#   1. Prometheus Operator installed (kube-prometheus-stack Helm chart)
+#   2. FastAPI app exposes /metrics via prometheus-fastapi-instrumentator
+#      Add to requirements.txt: prometheus-fastapi-instrumentator>=7.0.0
+#      Add to main.py:
+#        from prometheus_fastapi_instrumentator import Instrumentator
+#        Instrumentator().instrument(app).expose(app)
+#   3. 04-service.yaml must have a port named "metrics" on 5001
+#      (or add a separate metrics port — see note below)
+#   4. NetworkPolicy must allow Prometheus namespace ingress
+# =============================================================
+
+# ── ServiceMonitor — scrape FastAPI /metrics ──────────────────────────────────
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: kyc-python-monitor
+  namespace: kyc-blockchain
+  labels:
+    app.kubernetes.io/name: kyc-python
+    # Prometheus Operator discovers ServiceMonitors via this label.
+    # Verify: kubectl get prometheus -n monitoring -o yaml | grep -A5 serviceMonitorSelector
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: kyc-python
+  namespaceSelector:
+    matchNames:
+      - kyc-python
+  endpoints:
+    - port: http           # port NAME in 04-service.yaml — FastAPI serves /metrics on same port
+      interval: 30s
+      path: /metrics       # exposed by prometheus-fastapi-instrumentator
+      scrapeTimeout: 10s
+
+---
+# ── PrometheusRule — Alert Rules ──────────────────────────────────────────────
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: kyc-python-alerts
+  namespace: kyc-blockchain
+  labels:
+    app.kubernetes.io/name: kyc-python
+spec:
+  groups:
+    # --------------------------------------------------------
+    # Application Alerts (FastAPI / uvicorn metrics)
+    # --------------------------------------------------------
+    - name: kyc-python.rules
+      rules:
+        # ALERT: Pod is unreachable
+        # Same pattern as Go: up{} == 0 means scrape failed
+        - alert: KYCPythonDown
+          expr: up{namespace="kyc-blockchain", service=~".*kyc-python.*"} == 0
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "KYC Python AI service is down"
+            description: "{{ $labels.pod }} has been unreachable for 5 minutes."
+
+        # ALERT: High HTTP 5xx error rate (>5%)
+        # prometheus-fastapi-instrumentator exposes:
+        #   http_requests_total{method, status_code, handler}
+        - alert: KYCPythonHighErrorRate
+          expr: |
+            (
+              sum(rate(http_requests_total{namespace="kyc-blockchain", status_code=~"5.."}[5m]))
+              /
+              sum(rate(http_requests_total{namespace="kyc-blockchain"}[5m]))
+            ) > 0.05
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "High HTTP 5xx error rate on KYC Python API"
+            description: "5xx error rate is {{ $value | humanizePercentage }} (threshold: 5%)."
+
+        # ALERT: High P95 latency (>10s — AI inference is slow)
+        # Uses http_request_duration_seconds histogram from instrumentator
+        - alert: KYCPythonHighLatency
+          expr: |
+            histogram_quantile(0.95,
+              sum(rate(http_request_duration_seconds_bucket{namespace="kyc-blockchain"}[5m])) by (le)
+            ) > 10
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "High P95 latency on KYC Python API"
+            description: "95th percentile latency is {{ $value }}s (threshold: 10s — AI inference expected)."
+
+        # ALERT: High memory usage (>85% of limit)
+        # Python AI models (GFPGAN, DeepFace) are memory-heavy
+        - alert: KYCPythonHighMemory
+          expr: |
+            container_memory_working_set_bytes{namespace="kyc-blockchain", container="kyc-python"}
+            / container_spec_memory_limit_bytes{namespace="kyc-blockchain", container="kyc-python"}
+            > 0.85
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "KYC Python memory usage above 85%"
+            description: "AI model memory approaching container limit. Consider increasing limits or GPU offload."
+
+        # ALERT: Pod restarting frequently
+        # Same rule as Go project
+        - alert: KYCPythonPodRestarting
+          expr: |
+            increase(kube_pod_container_status_restarts_total{namespace="kyc-blockchain", container="kyc-python"}[1h]) > 3
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "KYC Python pod restarting frequently"
+            description: "{{ $labels.pod }} restarted {{ $value }} times in the last hour."
+
+        # ALERT: AI inference queue backing up (requests in-flight > threshold)
+        # Unique to Python — heavy model inference can saturate the single worker
+        - alert: KYCPythonHighConcurrency
+          expr: |
+            sum(http_requests_total{namespace="kyc-blockchain", status_code="0"}[1m]) > 5
+          for: 2m
+          labels:
+            severity: warning
+          annotations:
+            summary: "KYC Python high in-flight request count"
+            description: "More than 5 requests appear stalled — AI inference may be overloaded."
