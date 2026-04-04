@@ -15,10 +15,10 @@ on:
         options:
           - "false"
           - "true"
-      run_deploy:                          # ← ADD THIS INPUT
+      run_deploy:
         description: "Also deploy to Kubernetes after build?"
         required: true
-        default: "false"
+        default: "true"
         type: choice
         options:
           - "false"
@@ -202,7 +202,7 @@ jobs:
       - name: Apply ArgoCD application manifest
         run: |
           echo "Applying ArgoCD application..."
-          
+
           if [ ! -d "k8s/argocd/app/" ]; then
             echo "⚠️  k8s/argocd/app/ not found in repo — skipping."
             echo "Please commit the ArgoCD manifests first."
