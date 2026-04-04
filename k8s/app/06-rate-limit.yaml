@@ -10,7 +10,7 @@
 apiVersion: traefik.io/v1alpha1
 kind: Middleware
 metadata:
-  name: ratelimit
+  name: kyc-python-ratelimit
   namespace: kyc-blockchain
 spec:
   rateLimit:
@@ -25,7 +25,7 @@ spec:
 apiVersion: traefik.io/v1alpha1
 kind: Middleware
 metadata:
-  name: cors-headers
+  name: kyc-python-cors-headers
   namespace: kyc-blockchain
 spec:
   headers:
@@ -57,5 +57,6 @@ metadata:
 spec:
   chain:
     middlewares:
-      - name: ratelimit
-      - name: cors-headers
+      # Must different name from Go KYC's CORS middleware to avoid conflict (namespace + name = conflict)
+      - name: kyc-python-ratelimit
+      - name: kyc-python-cors-headers

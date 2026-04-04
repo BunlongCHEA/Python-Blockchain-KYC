@@ -15,23 +15,23 @@
 #   kubectl apply -f https://github.com/cert-manager/cert-manager/releases/latest/download/cert-manager.yaml
 # =============================================================
 
-# ── Staging (active) ──────────────────────────────────────────────────────────
-apiVersion: cert-manager.io/v1
-kind: ClusterIssuer
-metadata:
-  name: letsencrypt-staging
-spec:
-  acme:
-    server: https://acme-staging-v02.api.letsencrypt.org/directory
-    email: chea.bunlong.cloud2@gmail.com
-    privateKeySecretRef:
-      name: letsencrypt-staging-key    # same key name as Go project (shared ClusterIssuer)
-    solvers:
-      - http01:
-          ingress:
-            class: traefik
+# # ── Staging (active) ──────────────────────────────────────────────────────────
+# apiVersion: cert-manager.io/v1
+# kind: ClusterIssuer
+# metadata:
+#   name: letsencrypt-staging
+# spec:
+#   acme:
+#     server: https://acme-staging-v02.api.letsencrypt.org/directory
+#     email: chea.bunlong.cloud2@gmail.com
+#     privateKeySecretRef:
+#       name: letsencrypt-staging-key    # same key name as Go project (shared ClusterIssuer)
+#     solvers:
+#       - http01:
+#           ingress:
+#             class: traefik
 
----
+# ---
 # ── Production (commented — uncomment when staging is verified) ───────────────
 # apiVersion: cert-manager.io/v1
 # kind: ClusterIssuer

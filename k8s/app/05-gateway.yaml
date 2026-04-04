@@ -12,7 +12,7 @@ metadata:
     cert-manager.io/cluster-issuer: "letsencrypt-staging"
     traefik.ingress.kubernetes.io/router.entrypoints: web,websecure
     traefik.ingress.kubernetes.io/router.tls: "true"
-    traefik.ingress.kubernetes.io/router.middlewares: kyc-blockchain-ratelimit@kubernetescrd,kyc-blockchain-cors-headers@kubernetescrd
+    traefik.ingress.kubernetes.io/router.middlewares: kyc-blockchain-kyc-python-ratelimit@kubernetescrd,kyc-blockchain-kyc-python-cors-headers@kubernetescrd
 spec:
   tls:
     - hosts:
