@@ -182,6 +182,10 @@ FROM deps-cpu AS cpu
 ENV GFPGAN_MODEL_PATH=/app/models_pretrained/GFPGANv1.4.pth
 ENV REALESRGAN_MODEL_PATH=/app/models_pretrained/RealESRGAN_x2plus.pth
 ENV USE_GPU=false
+ENV DEEPFACE_HOME=/app/.deepface
+
+# pre-create the folder with correct ownership during build
+RUN mkdir -p /app/.deepface && chmod 777 /app/.deepface
 
 WORKDIR /app
 COPY . .
@@ -197,6 +201,10 @@ FROM deps-gpu AS gpu
 ENV GFPGAN_MODEL_PATH=/app/models_pretrained/GFPGANv1.4.pth
 ENV REALESRGAN_MODEL_PATH=/app/models_pretrained/RealESRGAN_x2plus.pth
 ENV USE_GPU=true
+ENV DEEPFACE_HOME=/app/.deepface
+
+# pre-create the folder with correct ownership during build
+RUN mkdir -p /app/.deepface && chmod 777 /app/.deepface
 
 WORKDIR /app
 COPY . .
