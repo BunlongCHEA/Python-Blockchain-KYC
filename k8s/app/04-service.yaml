@@ -14,7 +14,7 @@ spec:
       port: 5001
       targetPort: 5001
       protocol: TCP
-    # prometheus-fastapi-instrumentator exposes /metrics on same port
-    - name: metrics
-      port: 5001
-      targetPort: 5001
+    # # prometheus-fastapi-instrumentator exposes /metrics on same port
+    # - name: metrics
+    #   port: 5001
+    #   targetPort: 5001

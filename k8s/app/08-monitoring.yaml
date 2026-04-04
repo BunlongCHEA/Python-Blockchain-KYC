@@ -122,14 +122,14 @@ spec:
             summary: "KYC Python pod restarting frequently"
             description: "{{ $labels.pod }} restarted {{ $value }} times in the last hour."
 
-        # ALERT: AI inference queue backing up (requests in-flight > threshold)
-        # Unique to Python — heavy model inference can saturate the single worker
-        - alert: KYCPythonHighConcurrency
-          expr: |
-            sum(http_requests_total{namespace="kyc-blockchain", status_code="0"}[1m]) > 5
-          for: 2m
-          labels:
-            severity: warning
-          annotations:
-            summary: "KYC Python high in-flight request count"
-            description: "More than 5 requests appear stalled — AI inference may be overloaded."
+        # # ALERT: AI inference queue backing up (requests in-flight > threshold)
+        # # Unique to Python — heavy model inference can saturate the single worker
+        # - alert: KYCPythonHighConcurrency
+        #   expr: |
+        #     sum(http_requests_total{namespace="kyc-blockchain", status_code="0"}[1m]) > 5
+        #   for: 2m
+        #   labels:
+        #     severity: warning
+        #   annotations:
+        #     summary: "KYC Python high in-flight request count"
+        #     description: "More than 5 requests appear stalled — AI inference may be overloaded."
