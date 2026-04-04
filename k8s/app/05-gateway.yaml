@@ -1,144 +1,178 @@
-# =============================================================
-# Python KYC AI Service — Gateway (Traefik Gateway API)
-# =============================================================
-# REQUIREMENTS:
-#   1. Install Gateway API CRDs (standard channel):
-#      kubectl apply -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.2.0/standard-install.yaml
-#
-#   2. Traefik >= 2.10 with Gateway API enabled.
-#      In Traefik Helm values:
-#        experimental:
-#          kubernetesGateway:
-#            enabled: true
-#
-#   3. cert-manager installed for TLS (13-clusterissuer.yaml)
-#
-# NOTE: Go-Blockchain-KYC uses networking.k8s.io/v1 Ingress (simpler).
-#       Python KYC uses Gateway API (gateway.networking.k8s.io) as requested.
-#       Both sit behind the same Traefik instance on the cluster.
-# =============================================================
-
-# ── GatewayClass — use Traefik's built-in controller ─────────────────────────
-apiVersion: gateway.networking.k8s.io/v1
-kind: GatewayClass
+# Simple Traefik Ingress — mirrors Go-Blockchain-KYC/k8s/app/09-gateway.yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
 metadata:
-  name: traefik
-spec:
-  controllerName: traefik.io/gateway-controller
-
----
-# ── Gateway — entry point for HTTP + HTTPS ────────────────────────────────────
-apiVersion: gateway.networking.k8s.io/v1
-kind: Gateway
-metadata:
-  name: kyc-python-gateway
+  name: kyc-python-ingress
   namespace: kyc-blockchain
   labels:
     app.kubernetes.io/name: kyc-python
   annotations:
+    kubernetes.io/ingress.class: "traefik"
+    # cert-manager.io/cluster-issuer: "letsencrypt-prod"
     cert-manager.io/cluster-issuer: "letsencrypt-staging"
+    traefik.ingress.kubernetes.io/router.entrypoints: web,websecure
+    traefik.ingress.kubernetes.io/router.tls: "true"
+    traefik.ingress.kubernetes.io/router.middlewares: kyc-blockchain-ratelimit@kubernetescrd,kyc-blockchain-cors-headers@kubernetescrd
 spec:
-  gatewayClassName: traefik
-  listeners:
-    # HTTP — redirected to HTTPS via HTTPRoute below
-    - name: http
-      protocol: HTTP
-      port: 80
-      allowedRoutes:
-        namespaces:
-          from: Same
-
-    # HTTPS — TLS terminated at gateway, cert managed by cert-manager
-    - name: https
-      protocol: HTTPS
-      port: 443
-      tls:
-        mode: Terminate
-        certificateRefs:
-          - kind: Secret
-            name: kyc-python-tls-staging
-            namespace: kyc-blockchain
-      allowedRoutes:
-        namespaces:
-          from: Same
-
----
-# ── HTTPRoute — HTTP → HTTPS redirect ────────────────────────────────────────
-apiVersion: gateway.networking.k8s.io/v1
-kind: HTTPRoute
-metadata:
-  name: kyc-python-http-redirect
-  namespace: kyc-blockchain
-  labels:
-    app.kubernetes.io/name: kyc-python
-spec:
-  parentRefs:
-    - name: kyc-python-gateway
-      namespace: kyc-blockchain
-      sectionName: http
-  hostnames:
-    - "kyc-python-api.bunlong.uk"
+  tls:
+    - hosts:
+        - kyc-python-api.bunlong.uk
+      secretName: kyc-python-tls-staging
   rules:
-    - filters:
-        - type: RequestRedirect
-          requestRedirect:
-            scheme: https
-            statusCode: 301
+    - host: kyc-python-api.bunlong.uk
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: kyc-python-service
+                port:
+                  number: 5001
 
----
-# ── HTTPRoute — HTTPS traffic to kyc-python-service ──────────────────────────
-apiVersion: gateway.networking.k8s.io/v1
-kind: HTTPRoute
-metadata:
-  name: kyc-python-route
-  namespace: kyc-blockchain
-  labels:
-    app.kubernetes.io/name: kyc-python
-  annotations:
-    # Attach rate-limit + CORS middlewares (defined in 06-rate-limit.yaml)
-    traefik.ingress.kubernetes.io/router.middlewares: >-
-      kyc-python-ratelimit@kubernetescrd,
-      kyc-python-cors-headers@kubernetescrd
-spec:
-  parentRefs:
-    - name: kyc-python-gateway
-      namespace: kyc-blockchain
-      sectionName: https
-  hostnames:
-    - "kyc-python-api.bunlong.uk"
-  rules:
-    # /health — no middleware, always reachable (liveness/readiness probes)
-    - matches:
-        - path:
-            type: Exact
-            value: /health
-      backendRefs:
-        - name: kyc-python-service
-          port: 5001
 
-    # /docs + /redoc — FastAPI Swagger UI
-    - matches:
-        - path:
-            type: PathPrefix
-            value: /docs
-        - path:
-            type: PathPrefix
-            value: /redoc
-        - path:
-            type: PathPrefix
-            value: /openapi.json
-      backendRefs:
-        - name: kyc-python-service
-          port: 5001
 
-    # All API routes — rate-limited + CORS
-    - matches:
-        - path:
-            type: PathPrefix
-            value: /
-      backendRefs:
-        - name: kyc-python-service
-          port: 5001
-      timeouts:
-        request: 60s        # AI inference (face + OCR) can take time
-        backendRequest: 55s
+# # =============================================================
+# # Python KYC AI Service — Gateway (Traefik Gateway API)
+# # =============================================================
+# # REQUIREMENTS:
+# #   1. Install Gateway API CRDs (standard channel):
+# #      kubectl apply -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.2.0/standard-install.yaml
+# #
+# #   2. Traefik >= 2.10 with Gateway API enabled.
+# #      In Traefik Helm values:
+# #        experimental:
+# #          kubernetesGateway:
+# #            enabled: true
+# #
+# #   3. cert-manager installed for TLS (13-clusterissuer.yaml)
+# #
+# # NOTE: Go-Blockchain-KYC uses networking.k8s.io/v1 Ingress (simpler).
+# #       Python KYC uses Gateway API (gateway.networking.k8s.io) as requested.
+# #       Both sit behind the same Traefik instance on the cluster.
+# # =============================================================
+
+# # ── GatewayClass — use Traefik's built-in controller ─────────────────────────
+# apiVersion: gateway.networking.k8s.io/v1
+# kind: GatewayClass
+# metadata:
+#   name: traefik
+# spec:
+#   controllerName: traefik.io/gateway-controller
+
+# ---
+# # ── Gateway — entry point for HTTP + HTTPS ────────────────────────────────────
+# apiVersion: gateway.networking.k8s.io/v1
+# kind: Gateway
+# metadata:
+#   name: kyc-python-gateway
+#   namespace: kyc-blockchain
+#   labels:
+#     app.kubernetes.io/name: kyc-python
+#   annotations:
+#     cert-manager.io/cluster-issuer: "letsencrypt-staging"
+# spec:
+#   gatewayClassName: traefik
+#   listeners:
+#     # HTTP — redirected to HTTPS via HTTPRoute below
+#     - name: http
+#       protocol: HTTP
+#       port: 80
+#       allowedRoutes:
+#         namespaces:
+#           from: Same
+
+#     # HTTPS — TLS terminated at gateway, cert managed by cert-manager
+#     - name: https
+#       protocol: HTTPS
+#       port: 443
+#       tls:
+#         mode: Terminate
+#         certificateRefs:
+#           - kind: Secret
+#             name: kyc-python-tls-staging
+#             namespace: kyc-blockchain
+#       allowedRoutes:
+#         namespaces:
+#           from: Same
+
+# ---
+# # ── HTTPRoute — HTTP → HTTPS redirect ────────────────────────────────────────
+# apiVersion: gateway.networking.k8s.io/v1
+# kind: HTTPRoute
+# metadata:
+#   name: kyc-python-http-redirect
+#   namespace: kyc-blockchain
+#   labels:
+#     app.kubernetes.io/name: kyc-python
+# spec:
+#   parentRefs:
+#     - name: kyc-python-gateway
+#       namespace: kyc-blockchain
+#       sectionName: http
+#   hostnames:
+#     - "kyc-python-api.bunlong.uk"
+#   rules:
+#     - filters:
+#         - type: RequestRedirect
+#           requestRedirect:
+#             scheme: https
+#             statusCode: 301
+
+# ---
+# # ── HTTPRoute — HTTPS traffic to kyc-python-service ──────────────────────────
+# apiVersion: gateway.networking.k8s.io/v1
+# kind: HTTPRoute
+# metadata:
+#   name: kyc-python-route
+#   namespace: kyc-blockchain
+#   labels:
+#     app.kubernetes.io/name: kyc-python
+#   annotations:
+#     # Attach rate-limit + CORS middlewares (defined in 06-rate-limit.yaml)
+#     traefik.ingress.kubernetes.io/router.middlewares: >-
+#       kyc-python-ratelimit@kubernetescrd,
+#       kyc-python-cors-headers@kubernetescrd
+# spec:
+#   parentRefs:
+#     - name: kyc-python-gateway
+#       namespace: kyc-blockchain
+#       sectionName: https
+#   hostnames:
+#     - "kyc-python-api.bunlong.uk"
+#   rules:
+#     # /health — no middleware, always reachable (liveness/readiness probes)
+#     - matches:
+#         - path:
+#             type: Exact
+#             value: /health
+#       backendRefs:
+#         - name: kyc-python-service
+#           port: 5001
+
+#     # /docs + /redoc — FastAPI Swagger UI
+#     - matches:
+#         - path:
+#             type: PathPrefix
+#             value: /docs
+#         - path:
+#             type: PathPrefix
+#             value: /redoc
+#         - path:
+#             type: PathPrefix
+#             value: /openapi.json
+#       backendRefs:
+#         - name: kyc-python-service
+#           port: 5001
+
+#     # All API routes — rate-limited + CORS
+#     - matches:
+#         - path:
+#             type: PathPrefix
+#             value: /
+#       backendRefs:
+#         - name: kyc-python-service
+#           port: 5001
+#       timeouts:
+#         request: 60s        # AI inference (face + OCR) can take time
+#         backendRequest: 55s
