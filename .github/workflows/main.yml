@@ -57,10 +57,10 @@ jobs:
         run: |
           if [ "${{ steps.gpu.outputs.use_gpu }}" = "true" ]; then
             echo "image_tag=latest-gpu" >> $GITHUB_OUTPUT
-            echo "build_label=GPU (CUDA 12.1)" >> $GITHUB_OUTPUT
+            echo "target=gpu" >> $GITHUB_OUTPUT   # ← builds STAGE 4b (deps-gpu → gpu)
           else
             echo "image_tag=latest" >> $GITHUB_OUTPUT
-            echo "build_label=CPU" >> $GITHUB_OUTPUT
+            echo "target=cpu" >> $GITHUB_OUTPUT   # ← builds STAGE 4a (deps-cpu → cpu)  DEFAULT
           fi
 
       # ── 4. Set up Docker Buildx ────────────────────────────────────────
@@ -91,8 +91,7 @@ jobs:
         with:
           context: .
           file: ./Dockerfile
-          build-args: |
-            USE_GPU=${{ steps.gpu.outputs.use_gpu }}
+          target: ${{ steps.tag.outputs.target }}          # ← replaces build-args: USE_GPU
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}

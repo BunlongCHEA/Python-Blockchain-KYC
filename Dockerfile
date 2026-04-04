@@ -3,14 +3,7 @@
 #
 # Two build targets:
 #   CPU (default):  docker build -t kyc-python .
-#   GPU (CUDA):     docker build --build-arg USE_GPU=true -t kyc-python-gpu .
-#                   docker build --target gpu -t kyc-python-gpu .
-#
-# The FROM base-${USE_GPU} pattern is NOT supported by BuildKit
-# when the arg value resolves to a stage name dynamically.
-# Solution: use explicit named stages + a shared deps stage,
-# then select final stage via --target or a build arg at the
-# final COPY step.
+#   GPU (CUDA):     docker build --target gpu -t kyc-python-gpu .
 # =============================================================
 
 # ═══════════════════════════════════════════════════════════════
@@ -19,20 +12,23 @@
 FROM python:3.11-slim AS base-cpu
 
 # ═══════════════════════════════════════════════════════════════
-# STAGE 1b: GPU base — install Python on CUDA image
+# STAGE 1b: GPU base
 # ═══════════════════════════════════════════════════════════════
 FROM nvidia/cuda:12.1.1-runtime-ubuntu22.04 AS base-gpu
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         python3.11 python3.11-venv python3.11-dev python3-pip \
-        && ln -sf /usr/bin/python3.11 /usr/bin/python \
-        && ln -sf /usr/bin/pip3 /usr/bin/pip \
-        && rm -rf /var/lib/apt/lists/*
+    && ln -sf /usr/bin/python3.11 /usr/bin/python \
+    && ln -sf /usr/bin/pip3 /usr/bin/pip \
+    && rm -rf /var/lib/apt/lists/*
 
 # ═══════════════════════════════════════════════════════════════
-# STAGE 2: deps-cpu — system deps + Python packages on CPU base
+# STAGE 2: shared-deps — system packages only (no Python yet)
+#          Used as a template; actual pip install done per variant
 # ═══════════════════════════════════════════════════════════════
-FROM base-cpu AS deps-cpu
+
+# ── CPU: system deps ──────────────────────────────────────────
+FROM base-cpu AS system-cpu
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         libglib2.0-0 libsm6 libxext6 libxrender1 \
@@ -41,35 +37,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         git wget \
     && rm -rf /var/lib/apt/lists/*
 
-WORKDIR /app
-COPY requirements.txt .
-
-RUN grep -v -E "^(facexlib|gfpgan|realesrgan)" requirements.txt > requirements_base.txt \
-    && pip install --no-cache-dir -r requirements_base.txt
-
-RUN git clone --depth 1 https://github.com/XPixelGroup/BasicSR.git /tmp/BasicSR \
-    && echo '__version__ = "1.4.2"' > /tmp/BasicSR/basicsr/version.py \
-    && echo '__gitsha__ = "unknown"' >> /tmp/BasicSR/basicsr/version.py \
-    && printf 'import os\nfrom setuptools import find_packages, setup\n\ndef get_requirements():\n    req_path = os.path.join(os.path.dirname(__file__), "requirements.txt")\n    if os.path.exists(req_path):\n        with open(req_path) as f:\n            return [line.strip() for line in f if line.strip() and not line.startswith("#") and not line.startswith("-")]\n    return []\n\nsetup(\n    name="basicsr",\n    version="1.4.2",\n    description="BasicSR patched build",\n    packages=find_packages(),\n    include_package_data=True,\n    python_requires=">=3.7",\n    install_requires=get_requirements(),\n)\n' > /tmp/BasicSR/setup.py \
-    && rm -f /tmp/BasicSR/pyproject.toml \
-    && pip install --no-cache-dir --no-build-isolation /tmp/BasicSR \
-    && rm -rf /tmp/BasicSR
-
-RUN grep -E "^(facexlib|gfpgan|realesrgan)" requirements.txt > requirements_face.txt \
-    && pip install --no-cache-dir -r requirements_face.txt \
-    && rm -f requirements_base.txt requirements_face.txt
-
-RUN mkdir -p /app/models_pretrained \
-    && wget -q -O /app/models_pretrained/GFPGANv1.4.pth \
-        "https://github.com/TencentARC/GFPGAN/releases/download/v1.3.0/GFPGANv1.4.pth" \
-    && wget -q -O /app/models_pretrained/RealESRGAN_x2plus.pth \
-        "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.1/RealESRGAN_x2plus.pth" \
-    && echo "Models downloaded:" && ls -lh /app/models_pretrained/
-
-# ═══════════════════════════════════════════════════════════════
-# STAGE 3: deps-gpu — same as deps-cpu but on GPU base
-# ═════════════════════════════════════════════════��═════════════
-FROM base-gpu AS deps-gpu
+# ── GPU: system deps ──────────────────────────────────────────
+FROM base-gpu AS system-gpu
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         libglib2.0-0 libsm6 libxext6 libxrender1 \
@@ -78,30 +47,132 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         git wget \
     && rm -rf /var/lib/apt/lists/*
 
+# ═══════════════════════════════════════════════════════════════
+# STAGE 3a: deps-cpu — Python packages on CPU base
+# ═══════════════════════════════════════════════════════════════
+FROM system-cpu AS deps-cpu
+
 WORKDIR /app
-COPY requirements.txt .
 
-RUN grep -v -E "^(facexlib|gfpgan|realesrgan)" requirements.txt > requirements_base.txt \
-    && pip install --no-cache-dir -r requirements_base.txt
+# ── Copy requirements first (own layer for cache) ─────────────
+COPY requirements.txt ./requirements.txt
 
+# ── Step 1: base packages (everything except face restoration) ─
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel \
+    && grep -v -E "^(facexlib|gfpgan|realesrgan|#)" requirements.txt \
+       | grep -v "^$" \
+       > /tmp/requirements_base.txt \
+    && echo "=== Base requirements ===" \
+    && cat /tmp/requirements_base.txt \
+    && pip install --no-cache-dir -r /tmp/requirements_base.txt
+
+# ── Step 2: fix and install basicsr from source ───────────────
 RUN git clone --depth 1 https://github.com/XPixelGroup/BasicSR.git /tmp/BasicSR \
     && echo '__version__ = "1.4.2"' > /tmp/BasicSR/basicsr/version.py \
     && echo '__gitsha__ = "unknown"' >> /tmp/BasicSR/basicsr/version.py \
-    && printf 'import os\nfrom setuptools import find_packages, setup\n\ndef get_requirements():\n    req_path = os.path.join(os.path.dirname(__file__), "requirements.txt")\n    if os.path.exists(req_path):\n        with open(req_path) as f:\n            return [line.strip() for line in f if line.strip() and not line.startswith("#") and not line.startswith("-")]\n    return []\n\nsetup(\n    name="basicsr",\n    version="1.4.2",\n    description="BasicSR patched build",\n    packages=find_packages(),\n    include_package_data=True,\n    python_requires=">=3.7",\n    install_requires=get_requirements(),\n)\n' > /tmp/BasicSR/setup.py \
+    && printf '%s\n' \
+        'import os' \
+        'from setuptools import find_packages, setup' \
+        '' \
+        'def get_requirements():' \
+        '    req_path = os.path.join(os.path.dirname(__file__), "requirements.txt")' \
+        '    if os.path.exists(req_path):' \
+        '        with open(req_path) as f:' \
+        '            return [l.strip() for l in f if l.strip() and not l.startswith("#") and not l.startswith("-")]' \
+        '    return []' \
+        '' \
+        'setup(' \
+        '    name="basicsr",' \
+        '    version="1.4.2",' \
+        '    description="BasicSR patched build",' \
+        '    packages=find_packages(),' \
+        '    include_package_data=True,' \
+        '    python_requires=">=3.7",' \
+        '    install_requires=get_requirements(),' \
+        ')' \
+       > /tmp/BasicSR/setup.py \
     && rm -f /tmp/BasicSR/pyproject.toml \
     && pip install --no-cache-dir --no-build-isolation /tmp/BasicSR \
     && rm -rf /tmp/BasicSR
 
-RUN grep -E "^(facexlib|gfpgan|realesrgan)" requirements.txt > requirements_face.txt \
-    && pip install --no-cache-dir -r requirements_face.txt \
-    && rm -f requirements_base.txt requirements_face.txt
+# ── Step 3: face restoration packages (needs basicsr) ─────────
+RUN grep -E "^(facexlib|gfpgan|realesrgan)" requirements.txt \
+       > /tmp/requirements_face.txt \
+    && echo "=== Face requirements ===" \
+    && cat /tmp/requirements_face.txt \
+    && pip install --no-cache-dir -r /tmp/requirements_face.txt
+
+# ── Step 4: download model weights into layer cache ───────────
+RUN mkdir -p /app/models_pretrained \
+    && wget -q --show-progress \
+        -O /app/models_pretrained/GFPGANv1.4.pth \
+        "https://github.com/TencentARC/GFPGAN/releases/download/v1.3.0/GFPGANv1.4.pth" \
+    && wget -q --show-progress \
+        -O /app/models_pretrained/RealESRGAN_x2plus.pth \
+        "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.1/RealESRGAN_x2plus.pth" \
+    && echo "=== Models downloaded ===" \
+    && ls -lh /app/models_pretrained/
+
+# ═══════════════════════════════════════════════════════════════
+# STAGE 3b: deps-gpu — Python packages on GPU base
+# ═══════════════════════════════════════════════════════════════
+FROM system-gpu AS deps-gpu
+
+WORKDIR /app
+
+COPY requirements.txt ./requirements.txt
+
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel \
+    && grep -v -E "^(facexlib|gfpgan|realesrgan|#)" requirements.txt \
+       | grep -v "^$" \
+       > /tmp/requirements_base.txt \
+    && echo "=== Base requirements ===" \
+    && cat /tmp/requirements_base.txt \
+    && pip install --no-cache-dir -r /tmp/requirements_base.txt
+
+RUN git clone --depth 1 https://github.com/XPixelGroup/BasicSR.git /tmp/BasicSR \
+    && echo '__version__ = "1.4.2"' > /tmp/BasicSR/basicsr/version.py \
+    && echo '__gitsha__ = "unknown"' >> /tmp/BasicSR/basicsr/version.py \
+    && printf '%s\n' \
+        'import os' \
+        'from setuptools import find_packages, setup' \
+        '' \
+        'def get_requirements():' \
+        '    req_path = os.path.join(os.path.dirname(__file__), "requirements.txt")' \
+        '    if os.path.exists(req_path):' \
+        '        with open(req_path) as f:' \
+        '            return [l.strip() for l in f if l.strip() and not l.startswith("#") and not l.startswith("-")]' \
+        '    return []' \
+        '' \
+        'setup(' \
+        '    name="basicsr",' \
+        '    version="1.4.2",' \
+        '    description="BasicSR patched build",' \
+        '    packages=find_packages(),' \
+        '    include_package_data=True,' \
+        '    python_requires=">=3.7",' \
+        '    install_requires=get_requirements(),' \
+        ')' \
+       > /tmp/BasicSR/setup.py \
+    && rm -f /tmp/BasicSR/pyproject.toml \
+    && pip install --no-cache-dir --no-build-isolation /tmp/BasicSR \
+    && rm -rf /tmp/BasicSR
+
+RUN grep -E "^(facexlib|gfpgan|realesrgan)" requirements.txt \
+       > /tmp/requirements_face.txt \
+    && echo "=== Face requirements ===" \
+    && cat /tmp/requirements_face.txt \
+    && pip install --no-cache-dir -r /tmp/requirements_face.txt
 
 RUN mkdir -p /app/models_pretrained \
-    && wget -q -O /app/models_pretrained/GFPGANv1.4.pth \
+    && wget -q --show-progress \
+        -O /app/models_pretrained/GFPGANv1.4.pth \
         "https://github.com/TencentARC/GFPGAN/releases/download/v1.3.0/GFPGANv1.4.pth" \
-    && wget -q -O /app/models_pretrained/RealESRGAN_x2plus.pth \
+    && wget -q --show-progress \
+        -O /app/models_pretrained/RealESRGAN_x2plus.pth \
         "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.1/RealESRGAN_x2plus.pth" \
-    && echo "Models downloaded:" && ls -lh /app/models_pretrained/
+    && echo "=== Models downloaded ===" \
+    && ls -lh /app/models_pretrained/
 
 # ═══════════════════════════════════════════════════════════════
 # STAGE 4a: Final CPU image  (default — docker build .)
