@@ -1,4 +1,4 @@
-name: CI — Build & Push Docker Image
+name: CI — Build, Push & Deploy Docker Image
 
 on:
   push:
@@ -9,6 +9,14 @@ on:
     inputs:
       use_gpu:
         description: "Build GPU image? (true = CUDA, false = CPU)"
+        required: true
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
+      run_deploy:                          # ← ADD THIS INPUT
+        description: "Also deploy to Kubernetes after build?"
         required: true
         default: "false"
         type: choice
@@ -117,8 +125,8 @@ jobs:
     name: Deploy to Kubernetes & Sync ArgoCD
     runs-on: ubuntu-latest
     needs: build
-    # ── Manual only — equivalent to GitLab `when: manual` ──────────────
-    if: github.event_name == 'workflow_dispatch'
+    # ── Runs only when manually triggered AND run_deploy=true ─────────────
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.run_deploy == 'true'
     # environment: production
 
     steps:
