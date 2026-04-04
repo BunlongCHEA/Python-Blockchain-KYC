@@ -117,7 +117,7 @@ jobs:
           echo "| Trigger | \`${{ github.event_name }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| SHA | \`${{ github.sha }}\` |" >> $GITHUB_STEP_SUMMARY
 
-    # ══════════════════════════════════════════════════════════════════════
+  # ══════════════════════════════════════════════════════════════════════
   # JOB 2: Setup Cluster — install CRDs & controllers (idempotent)
   # Runs once before deploy. Safe to re-run — all steps use apply/upgrade.
   # Installs:
@@ -170,15 +170,36 @@ jobs:
       # Uses Helm upgrade --install (idempotent)
       - name: Enable Traefik Gateway API support
         run: |
-          echo "Upgrading Traefik with Gateway API enabled..."
+          echo "Checking current Traefik install..."
           helm repo add traefik https://traefik.github.io/charts
           helm repo update
 
-          helm upgrade --install traefik traefik/traefik \
-            --namespace kube-system \
-            --reuse-values \
-            --set experimental.kubernetesGateway.enabled=true \
-            --wait --timeout 120s
+          # Get current Traefik chart version installed in cluster
+          CURRENT_VERSION=$(helm list -n kube-system -o json \
+            | python3 -c "import sys,json; items=json.load(sys.stdin); \
+              match=[i for i in items if i['name']=='traefik']; \
+              print(match[0]['chart'] if match else '')" 2>/dev/null || echo "")
+
+          echo "Current Traefik: ${CURRENT_VERSION:-not installed}"
+
+          # Use --reset-then-reuse-values (Helm 3.14+) to drop removed keys
+          # then layer only the Gateway API flag on top.
+          # Falls back to --set only if Traefik is not yet installed.
+          if helm list -n kube-system | grep -q "^traefik"; then
+            echo "Upgrading existing Traefik install..."
+            helm upgrade traefik traefik/traefik \
+              --namespace kube-system \
+              --reset-then-reuse-values \
+              --set providers.kubernetesGateway.enabled=true \
+              --wait --timeout 120s
+          else
+            echo "Fresh Traefik install..."
+            helm install traefik traefik/traefik \
+              --namespace kube-system \
+              --create-namespace \
+              --set providers.kubernetesGateway.enabled=true \
+              --wait --timeout 120s
+          fi
 
           echo "✓ Traefik Gateway API enabled"
 

@@ -292,11 +292,13 @@ Process of Verify Face:
 
 # III. CI/CD Architecture
 
+Diagram for main.yml
+
 ```bash
 GitHub Push → main
       │
       ▼
-.github/workflows/ci.yml
+.github/workflows/main.yml
   ├─ workflow_dispatch: USE_GPU=false → builds CPU → ghcr.io/.../kyc-python-api:latest
   └─ workflow_dispatch: USE_GPU=true  → builds GPU → ghcr.io/.../kyc-python-api:latest-gpu
       │
@@ -311,6 +313,18 @@ k8s/argocd/app/kyc-python-application.yaml
         ├─ 02-configmap.yaml    (USE_GPU, POSTGRES_HOST, etc.)
         ├─ 03-deployment.yaml   (pulls ghcr.io image, injects Secret as env)
         └─ 04-service.yaml      (ClusterIP :5001)
+      │
+      ▼
+ setup-cluster               (skipped on PR)
+  ├─ Gateway API CRDs
+  ├─ Traefik kubernetesGateway=true
+  └─ cert-manager
+      │
+      ▼
+   deploy
+  ├─ namespace, ghcr-secret, secrets
+  ├─ kubectl apply -f k8s/argocd/app/   ← 05-gateway.yaml now works
+  └─ ArgoCD sync
 ```
 
 ### Required GitHub Secrets
