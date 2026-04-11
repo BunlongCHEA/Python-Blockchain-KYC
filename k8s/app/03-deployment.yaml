@@ -22,6 +22,52 @@ spec:
         runAsGroup: 1000
         fsGroup: 1000
 
+      # ── Init container: download models into PVC if not present ──────────
+      # Runs as root to write to PVC, then main container reads as uid 1000.
+      # Idempotent — skips download if .pth file already exists (pod restart safe).
+      initContainers:
+        - name: download-models
+          image: busybox:1.36
+          securityContext:
+            runAsUser: 0          # root — needed to write to PVC first time
+          command:
+            - sh
+            - -c
+            - |
+              set -e
+              mkdir -p /models
+
+              GFPGAN=/models/GFPGANv1.4.pth
+              ESRGAN=/models/RealESRGAN_x2plus.pth
+
+              if [ ! -f "$GFPGAN" ]; then
+                echo "Downloading GFPGANv1.4.pth (~350MB)..."
+                wget -q --show-progress \
+                  -O "$GFPGAN" \
+                  "https://github.com/TencentARC/GFPGAN/releases/download/v1.3.0/GFPGANv1.4.pth"
+                echo "✓ GFPGAN downloaded"
+              else
+                echo "✓ GFPGAN already exists — skipping"
+              fi
+
+              if [ ! -f "$ESRGAN" ]; then
+                echo "Downloading RealESRGAN_x2plus.pth (~64MB)..."
+                wget -q --show-progress \
+                  -O "$ESRGAN" \
+                  "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.1/RealESRGAN_x2plus.pth"
+                echo "✓ RealESRGAN downloaded"
+              else
+                echo "✓ RealESRGAN already exists — skipping"
+              fi
+
+              # ensure main container (uid 1000) can read files
+              chmod 644 /models/*.pth
+              echo "=== Models ready ==="
+              ls -lh /models/
+          volumeMounts:
+            - name: models-storage
+              mountPath: /models
+
       containers:
         - name: kyc-python
           # CPU image (default):  ghcr.io/bunlongchea/kyc-python-api:latest
@@ -56,6 +102,11 @@ spec:
             # Redirect to a writable emptyDir volume under /app
             - name: DEEPFACE_HOME
               value: "/app/.deepface"
+            # ── Override model paths to PVC mount ───────────────────
+            - name: GFPGAN_MODEL_PATH
+              value: "/app/models_pretrained/GFPGANv1.4.pth"
+            - name: REALESRGAN_MODEL_PATH
+              value: "/app/models_pretrained/RealESRGAN_x2plus.pth"
 
           # ── Health probes (/health is defined in main.py) ───────────
           livenessProbe:
@@ -106,7 +157,15 @@ spec:
           volumeMounts:
             - name: deepface-home
               mountPath: /app/.deepface
+            # ── PVC: models_pretrained/ mounted from persistent volume ──
+            - name: models-storage
+              mountPath: /app/models_pretrained
+              readOnly: true        # main container only reads, init writes
 
       volumes:
         - name: deepface-home
           emptyDir: {}
+        # ── PVC volume ──────────────────────────────────────────────
+        - name: models-storage
+          persistentVolumeClaim:
+            claimName: kyc-models-pvc

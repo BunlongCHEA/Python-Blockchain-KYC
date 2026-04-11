@@ -103,15 +103,15 @@ RUN grep -E "^(facexlib|gfpgan|realesrgan)" requirements.txt \
     && pip install --no-cache-dir -r /tmp/requirements_face.txt
 
 # ── Step 4: download model weights into layer cache ───────────
-RUN mkdir -p /app/models_pretrained \
-    && wget -q --show-progress \
-        -O /app/models_pretrained/GFPGANv1.4.pth \
-        "https://github.com/TencentARC/GFPGAN/releases/download/v1.3.0/GFPGANv1.4.pth" \
-    && wget -q --show-progress \
-        -O /app/models_pretrained/RealESRGAN_x2plus.pth \
-        "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.1/RealESRGAN_x2plus.pth" \
-    && echo "=== Models downloaded ===" \
-    && ls -lh /app/models_pretrained/
+# RUN mkdir -p /app/models_pretrained \
+#     && wget -q --show-progress \
+#         -O /app/models_pretrained/GFPGANv1.4.pth \
+#         "https://github.com/TencentARC/GFPGAN/releases/download/v1.3.0/GFPGANv1.4.pth" \
+#     && wget -q --show-progress \
+#         -O /app/models_pretrained/RealESRGAN_x2plus.pth \
+#         "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.1/RealESRGAN_x2plus.pth" \
+#     && echo "=== Models downloaded ===" \
+#     && ls -lh /app/models_pretrained/
 
 # ═══════════════════════════════════════════════════════════════
 # STAGE 3b: deps-gpu — Python packages on GPU base
@@ -164,15 +164,15 @@ RUN grep -E "^(facexlib|gfpgan|realesrgan)" requirements.txt \
     && cat /tmp/requirements_face.txt \
     && pip install --no-cache-dir -r /tmp/requirements_face.txt
 
-RUN mkdir -p /app/models_pretrained \
-    && wget -q --show-progress \
-        -O /app/models_pretrained/GFPGANv1.4.pth \
-        "https://github.com/TencentARC/GFPGAN/releases/download/v1.3.0/GFPGANv1.4.pth" \
-    && wget -q --show-progress \
-        -O /app/models_pretrained/RealESRGAN_x2plus.pth \
-        "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.1/RealESRGAN_x2plus.pth" \
-    && echo "=== Models downloaded ===" \
-    && ls -lh /app/models_pretrained/
+# RUN mkdir -p /app/models_pretrained \
+#     && wget -q --show-progress \
+#         -O /app/models_pretrained/GFPGANv1.4.pth \
+#         "https://github.com/TencentARC/GFPGAN/releases/download/v1.3.0/GFPGANv1.4.pth" \
+#     && wget -q --show-progress \
+#         -O /app/models_pretrained/RealESRGAN_x2plus.pth \
+#         "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.1/RealESRGAN_x2plus.pth" \
+#     && echo "=== Models downloaded ===" \
+#     && ls -lh /app/models_pretrained/
 
 # ═══════════════════════════════════════════════════════════════
 # STAGE 4a: Final CPU image  (default — docker build .)

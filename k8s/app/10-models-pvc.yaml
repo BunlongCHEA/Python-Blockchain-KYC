@@ -1,0 +1,30 @@
+# =============================================================
+# Python KYC AI Service — Model Weights PVC
+# =============================================================
+# Stores GFPGAN + RealESRGAN weights persistently on the node.
+# Models survive pod restarts — no re-download needed.
+#
+# Pre-populate ONCE after first deploy:
+#   kubectl exec -n kyc-blockchain deploy/kyc-python \
+#     -- wget -q -O /app/models_pretrained/GFPGANv1.4.pth \
+#     "https://github.com/TencentARC/GFPGAN/releases/download/v1.3.0/GFPGANv1.4.pth"
+#
+#   kubectl exec -n kyc-blockchain deploy/kyc-python \
+#     -- wget -q -O /app/models_pretrained/RealESRGAN_x2plus.pth \
+#     "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.1/RealESRGAN_x2plus.pth"
+# =============================================================
+
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: kyc-models-pvc
+  namespace: kyc-blockchain
+  labels:
+    app.kubernetes.io/name: kyc-python
+spec:
+  accessModes:
+    - ReadWriteOnce           # single node — fine for 1 replica
+  storageClassName: local-path  # k3s default storage class
+  resources:
+    requests:
+      storage: 2Gi            # GFPGANv1.4 ~350MB + RealESRGAN ~64MB + headroom

@@ -359,14 +359,14 @@ def verify_faces(id_img: np.ndarray, selfie_img: np.ndarray) -> Dict[str, Any]:
         logger.warning("[FACE] GFPGAN attempt prep failed: %s", exc)
 
     # ── Attempt 2: Real-ESRGAN super-resolution ──
-    # try:
-    #     upscaled = _upscale_realesrgan(id_img)
-    #     if upscaled is not None:
-    #         upscaled = _enhance_id_photo(upscaled)
-    #         upscaled = _normalize_brightness(upscaled)
-    #         attempts.append(("realesrgan_enhanced", upscaled, norm_selfie))
-    # except Exception as exc:
-    #     logger.warning("[FACE] Real-ESRGAN attempt prep failed: %s", exc)
+    try:
+        upscaled = _upscale_realesrgan(id_img)
+        if upscaled is not None:
+            upscaled = _enhance_id_photo(upscaled)
+            upscaled = _normalize_brightness(upscaled)
+            attempts.append(("realesrgan_enhanced", upscaled, norm_selfie))
+    except Exception as exc:
+        logger.warning("[FACE] Real-ESRGAN attempt prep failed: %s", exc)
 
     # ── Attempt 3: OpenCV enhanced (always available) ──
     # try:
