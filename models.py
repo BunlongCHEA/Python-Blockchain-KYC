@@ -109,3 +109,15 @@ class KYCVerifyResponse(BaseModel):
         None,
         description="Per-component scores used to compute overall_score"
     )
+    verified_by: Optional[str] = Field(
+        None,
+        description="Pipe-separated: ocr_engine|face_model|preprocessing  e.g. google_vision|ArcFace|gfpgan_restored"
+    )
+    document_hash: Optional[str] = Field(
+        None,
+        description="SHA-256 hex of the raw ID image bytes (64 chars)"
+    )
+    verification_date: Optional[int] = Field(
+        None,
+        description="Unix timestamp (seconds) when verification ran"
+    )

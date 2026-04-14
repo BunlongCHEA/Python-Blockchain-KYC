@@ -7,6 +7,7 @@ import logging
 import re
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
+import hashlib
 
 import cv2
 import numpy as np
@@ -345,6 +346,20 @@ def _run_pipeline(
             "threshold_review":     settings.SCORE_NEEDS_REVIEW,
             "ocr_strategy":         "dual_zone",
         }
+        
+    # ── Build verified_by: [ocr_engine, face_model, preprocessing] ──────────
+    ocr_engine   = "google_vision"                                    # reader.py always uses Cloud Vision
+    face_model   = face_result.get("model", settings.FACE_MODEL) if face_result else settings.FACE_MODEL
+    preprocessing = face_result.get("preprocessing", "raw") if face_result else "raw"
+    verified_by  = f"{ocr_engine}|{face_model}|{preprocessing}"      # e.g. "google_vision|ArcFace|gfpgan_restored"
+
+    # ── Build document_hash: SHA-256 of raw ID image bytes ──────────────────
+    document_hash = ""
+    if id_img_bytes:
+        document_hash = hashlib.sha256(id_img_bytes).hexdigest()      # 64-char hex, fits varchar(64)
+
+    # ── verification_date: Unix timestamp (bigint) ───────────────────────────
+    verification_date = int(datetime.now(timezone.utc).timestamp())
 
     return KYCVerifyResponse(
         customer_id=customer_id,
@@ -358,6 +373,9 @@ def _run_pipeline(
         reason=reason,
         timestamp=now,
         score_breakdown=breakdown,
+        verified_by=verified_by,
+        document_hash=document_hash,
+        verification_date=verification_date,
     )
 
 
