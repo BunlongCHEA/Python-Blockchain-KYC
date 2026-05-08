@@ -20,6 +20,7 @@ from models import KYCVerifyRequest, KYCVerifyResponse
 from ocr.extractor_id import extract_cambodian_id_fields
 from ocr.extractor_passport import extract_passport_fields
 from ocr.reader import run_ocr, run_ocr_mrz
+# from ocr.reader_tesseract import run_ocr, run_ocr_mrz
 from utils.image import decode_base64_image, preprocess_for_ocr, detect_mrz_zone
 from utils.scoring import compute_overall_score
 
@@ -243,7 +244,8 @@ def _run_pipeline(
                 # Dual-zone debug info
                 "mrz_raw_text":     mrz_texts,
                 "mrz_confidence":   round(mrz_conf, 4),
-                "ocr_strategy":     "dual_zone",
+                # "ocr_strategy":     "dual_zone",
+                "ocr_strategy":     "dual_zone_tesseract",
             }
 
         except Exception as exc:
@@ -287,7 +289,8 @@ def _run_pipeline(
                     "fields_total":     len(VALIDATABLE_FIELDS),
                     "invalid_fields":   invalid_fields,
                     "missing_required": missing_required,
-                    "ocr_strategy":     "dual_zone",
+                    # "ocr_strategy":     "dual_zone",
+                    "ocr_strategy":     "dual_zone_tesseract",
                 },
             )
 
@@ -328,7 +331,8 @@ def _run_pipeline(
             "overall_score":        score,
             "threshold_verified":   settings.SCORE_VERIFIED,
             "threshold_review":     settings.SCORE_NEEDS_REVIEW,
-            "ocr_strategy":         "dual_zone",
+            # "ocr_strategy":         "dual_zone",
+            "ocr_strategy":         "dual_zone_tesseract",
         }
     else:
         breakdown = {
@@ -344,11 +348,13 @@ def _run_pipeline(
             "overall_score":        score,
             "threshold_verified":   settings.SCORE_VERIFIED,
             "threshold_review":     settings.SCORE_NEEDS_REVIEW,
-            "ocr_strategy":         "dual_zone",
+            # "ocr_strategy":         "dual_zone",
+            "ocr_strategy":         "dual_zone_tesseract",
         }
         
     # ── Build verified_by: [ocr_engine, face_model, preprocessing] ──────────
-    ocr_engine   = "google_vision"                                    # reader.py always uses Cloud Vision
+    # ocr_engine   = "google_vision"                                  # reader.py always uses Cloud Vision
+    ocr_engine   = "pytesseract"
     face_model   = face_result.get("model", settings.FACE_MODEL) if face_result else settings.FACE_MODEL
     preprocessing = face_result.get("preprocessing", "raw") if face_result else "raw"
     verified_by  = f"{ocr_engine}|{face_model}|{preprocessing}"      # e.g. "google_vision|ArcFace|gfpgan_restored"

@@ -14,6 +14,7 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
 from models import OCRScanResult, ScanRequest
 from ocr.reader import run_ocr, run_ocr_mrz
+# from ocr.reader_tesseract import run_ocr, run_ocr_mrz
 from ocr.extractor_id import extract_cambodian_id_fields
 from ocr.extractor_passport import extract_passport_fields
 from utils.image import decode_base64_image, detect_mrz_zone, preprocess_for_ocr
